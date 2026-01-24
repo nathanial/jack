@@ -2,6 +2,9 @@
   Jack Socket FFI
   BSD socket bindings using POSIX sockets.
 -/
+import Jack.Types
+import Jack.Address
+import Jack.Error
 
 namespace Jack
 
@@ -12,17 +15,29 @@ instance : Nonempty Socket := SocketPointed.property
 
 namespace Socket
 
-/-- Create a new TCP socket -/
+/-- Create a new TCP socket (convenience wrapper) -/
 @[extern "jack_socket_new"]
 opaque new : IO Socket
 
-/-- Connect socket to a remote host and port -/
+/-- Create a socket with specified family, type, and protocol -/
+@[extern "jack_socket_create"]
+opaque create (family : AddressFamily) (sockType : SocketType) (protocol : Protocol) : IO Socket
+
+/-- Connect socket to a remote host and port (string address) -/
 @[extern "jack_socket_connect"]
 opaque connect (sock : @& Socket) (host : @& String) (port : UInt16) : IO Unit
 
-/-- Bind socket to an address and port -/
+/-- Connect socket using structured address -/
+@[extern "jack_socket_connect_addr"]
+opaque connectAddr (sock : @& Socket) (addr : @& SockAddr) : IO Unit
+
+/-- Bind socket to an address and port (string address) -/
 @[extern "jack_socket_bind"]
 opaque bind (sock : @& Socket) (host : @& String) (port : UInt16) : IO Unit
+
+/-- Bind socket using structured address -/
+@[extern "jack_socket_bind_addr"]
+opaque bindAddr (sock : @& Socket) (addr : @& SockAddr) : IO Unit
 
 /-- Start listening for connections -/
 @[extern "jack_socket_listen"]
@@ -51,6 +66,22 @@ opaque fd (sock : @& Socket) : UInt32
 /-- Set recv/send timeouts in seconds -/
 @[extern "jack_socket_set_timeout"]
 opaque setTimeout (sock : @& Socket) (timeoutSecs : UInt32) : IO Unit
+
+/-- Get the local address the socket is bound to -/
+@[extern "jack_socket_get_local_addr"]
+opaque getLocalAddr (sock : @& Socket) : IO SockAddr
+
+/-- Get the remote peer address (for connected sockets) -/
+@[extern "jack_socket_get_peer_addr"]
+opaque getPeerAddr (sock : @& Socket) : IO SockAddr
+
+/-- Send data to a specific address (UDP) -/
+@[extern "jack_socket_send_to"]
+opaque sendTo (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) : IO Unit
+
+/-- Receive data and sender address (UDP) -/
+@[extern "jack_socket_recv_from"]
+opaque recvFrom (sock : @& Socket) (maxBytes : UInt32) : IO (ByteArray × SockAddr)
 
 end Socket
 
