@@ -7,24 +7,56 @@ open Jack
 
 testSuite "Jack.Error"
 
-test "SocketError toString" := do
-  ensure (SocketError.connectionRefused.toString == "Connection refused") "connection refused"
-  ensure (SocketError.timedOut.toString == "Operation timed out") "timed out"
-  ensure (SocketError.wouldBlock.isRetryable) "would block is retryable"
+test "SocketError toString coverage" := do
+  -- Test all simple constructors
+  ensure (SocketError.accessDenied.toString == "Access denied") "accessDenied"
+  ensure (SocketError.addressInUse.toString == "Address already in use") "addressInUse"
+  ensure (SocketError.addressNotAvailable.toString == "Address not available") "addressNotAvailable"
+  ensure (SocketError.connectionRefused.toString == "Connection refused") "connectionRefused"
+  ensure (SocketError.connectionReset.toString == "Connection reset by peer") "connectionReset"
+  ensure (SocketError.connectionAborted.toString == "Connection aborted") "connectionAborted"
+  ensure (SocketError.networkUnreachable.toString == "Network unreachable") "networkUnreachable"
+  ensure (SocketError.hostUnreachable.toString == "Host unreachable") "hostUnreachable"
+  ensure (SocketError.timedOut.toString == "Operation timed out") "timedOut"
+  ensure (SocketError.wouldBlock.toString == "Operation would block") "wouldBlock"
+  ensure (SocketError.interrupted.toString == "Operation interrupted") "interrupted"
+  ensure (SocketError.invalidArgument.toString == "Invalid argument") "invalidArgument"
+  ensure (SocketError.notConnected.toString == "Socket not connected") "notConnected"
+  ensure (SocketError.alreadyConnected.toString == "Socket already connected") "alreadyConnected"
+  ensure (SocketError.badDescriptor.toString == "Bad file descriptor") "badDescriptor"
+  ensure (SocketError.permissionDenied.toString == "Permission denied") "permissionDenied"
+
+test "SocketError unknown formatting" := do
+  let err := SocketError.unknown 99 "Custom error"
+  ensure (err.toString == "Unknown error (99): Custom error") "unknown formatting"
+
+test "SocketError isRetryable" := do
+  ensure SocketError.wouldBlock.isRetryable "wouldBlock is retryable"
+  ensure SocketError.interrupted.isRetryable "interrupted is retryable"
+  ensure (!SocketError.connectionRefused.isRetryable) "connectionRefused is not retryable"
+  ensure (!SocketError.timedOut.isRetryable) "timedOut is not retryable"
 
 test "SocketError isConnectionLost" := do
-  ensure SocketError.connectionReset.isConnectionLost "reset is connection lost"
-  ensure SocketError.networkUnreachable.isConnectionLost "network unreachable is connection lost"
-  ensure (!SocketError.wouldBlock.isConnectionLost) "would block is not connection lost"
+  ensure SocketError.connectionRefused.isConnectionLost "connectionRefused"
+  ensure SocketError.connectionReset.isConnectionLost "connectionReset"
+  ensure SocketError.connectionAborted.isConnectionLost "connectionAborted"
+  ensure SocketError.networkUnreachable.isConnectionLost "networkUnreachable"
+  ensure SocketError.hostUnreachable.isConnectionLost "hostUnreachable"
+  ensure SocketError.notConnected.isConnectionLost "notConnected"
+  ensure (!SocketError.wouldBlock.isConnectionLost) "wouldBlock is not connection lost"
+  ensure (!SocketError.timedOut.isConnectionLost) "timedOut is not connection lost"
 
 -- ========== Types Tests ==========
 
 testSuite "Jack.Types"
 
+-- Note: AddressFamily values are platform-specific (macOS values shown)
+-- AF_INET=2 is standard, AF_UNIX=1 is standard, AF_INET6 varies (30 on macOS, 10 on Linux)
 test "AddressFamily toUInt32" := do
   ensure (AddressFamily.inet.toUInt32 == 2) "AF_INET = 2"
-  ensure (AddressFamily.inet6.toUInt32 == 30) "AF_INET6 = 30"
   ensure (AddressFamily.unix.toUInt32 == 1) "AF_UNIX = 1"
+  -- AF_INET6 is platform-specific, just verify it's set to something reasonable
+  ensure (AddressFamily.inet6.toUInt32 > 0) "AF_INET6 is set"
 
 test "SocketType toUInt32" := do
   ensure (SocketType.stream.toUInt32 == 1) "SOCK_STREAM = 1"
@@ -50,10 +82,13 @@ test "IPv4Addr parse invalid" := do
   ensure (IPv4Addr.parse "256.0.0.1" == none) "reject out of range"
   ensure (IPv4Addr.parse "1.2.3" == none) "reject too few parts"
   ensure (IPv4Addr.parse "1.2.3.4.5" == none) "reject too many parts"
+  ensure (IPv4Addr.parse "" == none) "reject empty"
+  ensure (IPv4Addr.parse "1.2.3." == none) "reject trailing dot"
 
 test "IPv4Addr toString" := do
   ensure (IPv4Addr.loopback.toString == "127.0.0.1") "loopback to string"
   ensure (IPv4Addr.any.toString == "0.0.0.0") "any to string"
+  ensure (IPv4Addr.broadcast.toString == "255.255.255.255") "broadcast to string"
 
 test "IPv4Addr constants" := do
   ensure (IPv4Addr.any == ⟨0, 0, 0, 0⟩) "any is 0.0.0.0"
@@ -64,12 +99,45 @@ test "IPv4Addr toUInt32/fromUInt32" := do
   let addr := IPv4Addr.loopback
   let n := addr.toUInt32
   let addr2 := IPv4Addr.fromUInt32 n
-  ensure (addr == addr2) "roundtrip"
+  ensure (addr == addr2) "roundtrip loopback"
+  -- Test another address
+  let addr3 : IPv4Addr := ⟨192, 168, 1, 100⟩
+  ensure (IPv4Addr.fromUInt32 addr3.toUInt32 == addr3) "roundtrip private"
 
-test "SockAddr construction" := do
+test "SockAddr.ipv4 construction and accessors" := do
   let addr := SockAddr.ipv4Loopback 8080
   ensure (addr.port == some 8080) "port accessor"
   ensure (addr.toString == "127.0.0.1:8080") "toString"
+  let addr2 := SockAddr.ipv4Any 443
+  ensure (addr2.port == some 443) "any port accessor"
+
+test "SockAddr.ipv6 construction and accessors" := do
+  -- Create a simple IPv6 address (16 zero bytes)
+  let bytes : ByteArray := ⟨#[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]⟩
+  let addr := SockAddr.ipv6 bytes 8080
+  ensure (addr.port == some 8080) "ipv6 port accessor"
+  ensure (addr.toString == "[ipv6]:8080") "ipv6 toString"
+
+test "SockAddr.unix construction and accessors" := do
+  let addr := SockAddr.unix "/tmp/test.sock"
+  ensure (addr.port == none) "unix has no port"
+  ensure (addr.toString == "unix:/tmp/test.sock") "unix toString"
+
+test "SockAddr BEq" := do
+  let a1 := SockAddr.ipv4Loopback 80
+  let a2 := SockAddr.ipv4Loopback 80
+  let a3 := SockAddr.ipv4Loopback 443
+  let a4 := SockAddr.ipv4Any 80
+  ensure (a1 == a2) "same addresses equal"
+  ensure (a1 != a3) "different ports not equal"
+  ensure (a1 != a4) "different IPs not equal"
+  -- Unix sockets
+  let u1 := SockAddr.unix "/tmp/a.sock"
+  let u2 := SockAddr.unix "/tmp/a.sock"
+  let u3 := SockAddr.unix "/tmp/b.sock"
+  ensure (u1 == u2) "same unix paths equal"
+  ensure (u1 != u3) "different unix paths not equal"
+  ensure (a1 != u1) "ipv4 != unix"
 
 test "SockAddr fromHostPort" := do
   let addr := SockAddr.fromHostPort "192.168.1.1" 443
@@ -78,6 +146,8 @@ test "SockAddr fromHostPort" := do
     ensure (ip == ⟨192, 168, 1, 1⟩) "correct ip"
     ensure (port == 443) "correct port"
   | _ => ensure false "should parse"
+  -- Invalid address
+  ensure (SockAddr.fromHostPort "invalid" 80 == none) "reject invalid"
 
 -- ========== Socket Tests ==========
 
@@ -89,17 +159,16 @@ test "create and close socket" := do
 
 test "create TCP socket with Socket.create" := do
   let sock ← Socket.create .inet .stream .tcp
-  let fd := sock.fd
-  ensure (fd > 0) "valid fd"
+  -- Just verify we can get a valid fd (don't check specific value as fd 0 is technically valid)
+  let _ := sock.fd
   sock.close
 
 test "create UDP socket" := do
   let sock ← Socket.create .inet .dgram .udp
-  let fd := sock.fd
-  ensure (fd > 0) "valid fd"
+  let _ := sock.fd
   sock.close
 
-test "bind to port" := do
+test "bind to port with string address" := do
   let sock ← Socket.new
   sock.bind "127.0.0.1" 0  -- Port 0 = OS assigns
   sock.close
@@ -109,11 +178,25 @@ test "bind with structured address" := do
   sock.bindAddr (SockAddr.ipv4Loopback 0)
   sock.close
 
-test "get file descriptor" := do
-  let sock ← Socket.new
-  let fd := sock.fd
-  ensure (fd != 0) "file descriptor should be non-zero"
-  sock.close
+test "connect with string address" := do
+  -- Set up a server to connect to
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+  let port := match serverAddr with
+    | .ipv4 _ p => p
+    | _ => 0
+
+  -- Connect using string-based connect
+  let client ← Socket.new
+  client.connect "127.0.0.1" port
+  client.close
+
+  -- Accept and close server side
+  let conn ← server.accept
+  conn.close
+  server.close
 
 test "get local address after bind" := do
   let sock ← Socket.new
@@ -130,6 +213,13 @@ test "listen on socket" := do
   let sock ← Socket.new
   sock.bind "127.0.0.1" 0
   sock.listen 5
+  sock.close
+
+test "setTimeout" := do
+  let sock ← Socket.new
+  -- Just verify the call succeeds
+  sock.setTimeout 10
+  sock.setTimeout 1
   sock.close
 
 -- ========== UDP Tests ==========
@@ -178,19 +268,54 @@ test "UDP roundtrip" := do
 
 testSuite "Jack.Poll"
 
-test "PollEvent conversion" := do
+test "PollEvent arrayToMask" := do
   let events := #[PollEvent.readable, PollEvent.writable]
   let mask := PollEvent.arrayToMask events
-  ensure (mask == 0x0005) "correct mask"  -- POLLIN | POLLOUT
+  ensure (mask == 0x0005) "readable | writable"  -- POLLIN | POLLOUT
 
-  let back := PollEvent.maskToArray mask
+  let allEvents := #[PollEvent.readable, PollEvent.writable, PollEvent.error, PollEvent.hangup]
+  let allMask := PollEvent.arrayToMask allEvents
+  ensure (allMask == 0x001D) "all events"  -- POLLIN | POLLOUT | POLLERR | POLLHUP
+
+  let empty : Array PollEvent := #[]
+  ensure (PollEvent.arrayToMask empty == 0) "empty array"
+
+test "PollEvent maskToArray" := do
+  let back := PollEvent.maskToArray 0x0005  -- POLLIN | POLLOUT
   ensure (back.contains .readable) "has readable"
   ensure (back.contains .writable) "has writable"
+  ensure (!back.contains .error) "no error"
+  ensure (!back.contains .hangup) "no hangup"
 
-test "set non-blocking" := do
+  -- Test error and hangup
+  let errMask := PollEvent.maskToArray 0x0018  -- POLLERR | POLLHUP
+  ensure (errMask.contains .error) "has error"
+  ensure (errMask.contains .hangup) "has hangup"
+
+  -- Empty mask
+  ensure (PollEvent.maskToArray 0 == #[]) "zero mask is empty"
+
+test "setNonBlocking toggles mode" := do
   let sock ← Socket.new
+  -- Set non-blocking
   sock.setNonBlocking true
+  -- Set back to blocking
   sock.setNonBlocking false
+  sock.close
+
+test "non-blocking recv returns wouldBlock" := do
+  let sock ← Socket.create .inet .dgram .udp
+  sock.bindAddr (SockAddr.ipv4Loopback 0)
+  sock.setNonBlocking true
+
+  -- Try to recv when no data is available - should fail with wouldBlock (EAGAIN)
+  let threw ← try
+    let _ ← sock.recvFrom 1024
+    pure false
+  catch _ =>
+    pure true
+
+  ensure threw "non-blocking recv with no data should throw"
   sock.close
 
 test "poll for writable" := do
@@ -223,14 +348,19 @@ test "poll readable after send" := do
   server.close
   client.close
 
-test "Poll.wait multiple sockets" := do
+test "Poll.wait with empty entries" := do
+  let results ← Poll.wait #[] 0
+  ensure (results.size == 0) "empty input gives empty output"
+
+test "Poll.wait multiple sockets identifies correct socket" := do
   let sock1 ← Socket.create .inet .dgram .udp
   sock1.bindAddr (SockAddr.ipv4Loopback 0)
   let addr1 ← sock1.getLocalAddr
+  let fd1 := sock1.fd
 
   let sock2 ← Socket.create .inet .dgram .udp
   sock2.bindAddr (SockAddr.ipv4Loopback 0)
-  let _addr2 ← sock2.getLocalAddr
+  let fd2 := sock2.fd
 
   -- Send to sock1 only
   let sender ← Socket.create .inet .dgram .udp
@@ -243,17 +373,24 @@ test "Poll.wait multiple sockets" := do
 
   let results ← Poll.wait entries 1000
 
-  -- sock1 should be readable, sock2 should not
+  -- Exactly one socket should be ready
   ensure (results.size == 1) "only one socket ready"
+
+  -- Verify it's sock1 (by checking fd)
+  match results[0]? with
+  | some result =>
+    ensure (result.events.contains .readable) "is readable"
+    ensure (result.socket.fd == fd1) "correct socket (sock1)"
+    ensure (result.socket.fd != fd2) "not sock2"
+  | none => ensure false "expected result"
+
+  -- Verify we can actually read from the ready socket
+  let (data, _) ← sock1.recvFrom 1024
+  ensure (String.fromUTF8! data == "hello") "data received on correct socket"
 
   sock1.close
   sock2.close
   sender.close
-  -- Verify the ready socket received data
-  match results[0]? with
-  | some result =>
-    ensure (result.events.contains .readable) "sock1 is readable"
-  | none => ensure false "expected result"
 
 -- ========== TCP Integration Tests ==========
 
