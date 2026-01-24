@@ -7,8 +7,8 @@ package jack where
 require crucible from git "https://github.com/nathanial/crucible" @ "v0.0.9"
 
 @[default_target]
-lean_lib Ujack where
-  roots := #[`Ujack]
+lean_lib Jack where
+  roots := #[`Jack]
 
 lean_lib Tests where
   roots := #[`Tests]
