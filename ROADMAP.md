@@ -60,8 +60,8 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 - [x] `SO_REUSEPORT` - port reuse
 - [x] `SO_KEEPALIVE` - TCP keepalive
 - [x] `SO_RCVBUF` / `SO_SNDBUF` - buffer sizes
-- [ ] `TCP_NODELAY` - disable Nagle's algorithm
-- [ ] `SO_LINGER` - linger on close
+- [x] `TCP_NODELAY` - disable Nagle's algorithm
+- [x] `SO_LINGER` - linger on close
 - [x] `Socket.setTimeout` - recv/send timeouts
 
 ## Phase 7: Non-blocking I/O

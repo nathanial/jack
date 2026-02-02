@@ -140,6 +140,28 @@ def getSendBuf (sock : @& Socket) : IO UInt32 := do
   let opt ← SocketOption.soSndBuf
   sock.getOptionUInt32 level opt
 
+/-- Enable or disable TCP_NODELAY (disable Nagle's algorithm). -/
+def setTcpNoDelay (sock : @& Socket) (enabled : Bool) : IO Unit := do
+  let level ← SocketOption.ipProtoTcp
+  let opt ← SocketOption.tcpNoDelay
+  let value : UInt32 := if enabled then 1 else 0
+  sock.setOptionUInt32 level opt value
+
+/-- Check whether TCP_NODELAY is enabled. -/
+def getTcpNoDelay (sock : @& Socket) : IO Bool := do
+  let level ← SocketOption.ipProtoTcp
+  let opt ← SocketOption.tcpNoDelay
+  let value ← sock.getOptionUInt32 level opt
+  return value != 0
+
+/-- Configure SO_LINGER with enabled flag and linger time in seconds. -/
+@[extern "jack_socket_set_linger"]
+opaque setLinger (sock : @& Socket) (enabled : Bool) (seconds : UInt32) : IO Unit
+
+/-- Get SO_LINGER settings: (enabled, linger seconds). -/
+@[extern "jack_socket_get_linger"]
+opaque getLinger (sock : @& Socket) : IO (Bool × UInt32)
+
 /-- Enable or disable IPV6_V6ONLY on an IPv6 socket. -/
 def setIPv6Only (sock : @& Socket) (enabled : Bool) : IO Unit := do
   let level ← SocketOption.ipProtoIpv6

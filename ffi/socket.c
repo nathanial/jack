@@ -865,6 +865,44 @@ LEAN_EXPORT lean_obj_res jack_socket_get_option_uint32(
     return lean_io_result_mk_ok(lean_box_uint32(opt_value));
 }
 
+/* Set SO_LINGER option */
+LEAN_EXPORT lean_obj_res jack_socket_set_linger(
+    b_lean_obj_arg sock_obj,
+    uint8_t enabled,
+    uint32_t seconds,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    struct linger opt;
+    opt.l_onoff = enabled ? 1 : 0;
+    opt.l_linger = (int)seconds;
+
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_LINGER, &opt, sizeof(opt)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Get SO_LINGER option */
+LEAN_EXPORT lean_obj_res jack_socket_get_linger(
+    b_lean_obj_arg sock_obj,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    struct linger opt;
+    socklen_t opt_len = (socklen_t)sizeof(opt);
+
+    if (getsockopt(sock->fd, SOL_SOCKET, SO_LINGER, &opt, &opt_len) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, lean_box(opt.l_onoff ? 1 : 0));
+    lean_ctor_set(pair, 1, lean_box_uint32((uint32_t)opt.l_linger));
+    return lean_io_result_mk_ok(pair);
+}
+
 /* ========== Non-blocking I/O ========== */
 
 /* Set socket to non-blocking mode */

@@ -3,8 +3,6 @@
 Current open issues and proposed execution order.
 
 Open issues:
-- 658 TCP_NODELAY socket option
-- 659 SO_LINGER socket option
 - 660 Async-friendly API design
 - 661 Unix socket abstract namespace (Linux)
 - 662 Unix socket tests
@@ -26,19 +24,19 @@ Recently completed:
 - 655 SO_REUSEPORT socket option
 - 656 SO_KEEPALIVE socket option
 - 657 SO_RCVBUF / SO_SNDBUF socket options
+- 658 TCP_NODELAY socket option
+- 659 SO_LINGER socket option
 
 Recommended order:
-1) 658 TCP_NODELAY
-2) 659 SO_LINGER
-3) 663 Socket.shutdown
-4) 666 Socket pair creation
-5) 665 Scatter/gather I/O
-6) 664 Socket.sendFile
-7) 667 Out-of-band data
-8) 661 Unix abstract namespace
-9) 662 Unix socket tests
-10) 660 Async-friendly API design
-11) 671 Performance benchmarks
-12) 668 API documentation
-13) 672 Platform compatibility notes
-14) 669/670 Tutorials
+1) 663 Socket.shutdown
+2) 666 Socket pair creation
+3) 665 Scatter/gather I/O
+4) 664 Socket.sendFile
+5) 667 Out-of-band data
+6) 661 Unix abstract namespace
+7) 662 Unix socket tests
+8) 660 Async-friendly API design
+9) 671 Performance benchmarks
+10) 668 API documentation
+11) 672 Platform compatibility notes
+12) 669/670 Tutorials

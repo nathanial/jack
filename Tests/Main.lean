@@ -576,6 +576,23 @@ test "set/get TCP_NODELAY" := do
   ensure (roundtrip.size == initial.size) "option size stable"
   sock.close
 
+test "TCP_NODELAY helper roundtrip" := do
+  let sock ← Socket.new
+  let initial ← sock.getTcpNoDelay
+  sock.setTcpNoDelay initial
+  let roundtrip ← sock.getTcpNoDelay
+  ensure (roundtrip == initial) "tcp_nodelay roundtrip"
+  sock.close
+
+test "SO_LINGER helper roundtrip" := do
+  let sock ← Socket.new
+  let (enabled, seconds) ← sock.getLinger
+  sock.setLinger enabled seconds
+  let (enabled2, seconds2) ← sock.getLinger
+  ensure (enabled2 == enabled) "linger enabled roundtrip"
+  ensure (seconds2 == seconds) "linger seconds roundtrip"
+  sock.close
+
 test "set/get IPV6_V6ONLY" := do
   let sock ← Socket.create .inet6 .stream .tcp
   let ipProtoIpv6 ← SocketOption.ipProtoIpv6
