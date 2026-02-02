@@ -71,6 +71,14 @@ opaque fd (sock : @& Socket) : UInt32
 @[extern "jack_socket_set_timeout"]
 opaque setTimeout (sock : @& Socket) (timeoutSecs : UInt32) : IO Unit
 
+/-- Set a raw socket option value. The ByteArray is passed as-is to setsockopt. -/
+@[extern "jack_socket_set_option"]
+opaque setOption (sock : @& Socket) (level : UInt32) (optName : UInt32) (value : @& ByteArray) : IO Unit
+
+/-- Get a raw socket option value. Returns up to maxBytes from getsockopt. -/
+@[extern "jack_socket_get_option"]
+opaque getOption (sock : @& Socket) (level : UInt32) (optName : UInt32) (maxBytes : UInt32) : IO ByteArray
+
 /-- Get the local address the socket is bound to -/
 @[extern "jack_socket_get_local_addr"]
 opaque getLocalAddr (sock : @& Socket) : IO SockAddr

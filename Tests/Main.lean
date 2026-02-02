@@ -465,4 +465,30 @@ test "get peer address" := do
     ensure (ip == IPv4Addr.loopback) "peer is loopback"
   | _ => ensure false "expected IPv4"
 
+-- ========== Socket Option Tests ==========
+
+testSuite "Jack.Socket.Options"
+
+test "set/get SO_REUSEADDR" := do
+  let sock ← Socket.new
+  let solSocket ← SocketOption.solSocket
+  let soReuseAddr ← SocketOption.soReuseAddr
+  let initial ← sock.getOption solSocket soReuseAddr 16
+  ensure (initial.size > 0) "initial option non-empty"
+  sock.setOption solSocket soReuseAddr initial
+  let roundtrip ← sock.getOption solSocket soReuseAddr 16
+  ensure (roundtrip.size == initial.size) "option size stable"
+  sock.close
+
+test "set/get TCP_NODELAY" := do
+  let sock ← Socket.new
+  let ipProtoTcp ← SocketOption.ipProtoTcp
+  let tcpNoDelay ← SocketOption.tcpNoDelay
+  let initial ← sock.getOption ipProtoTcp tcpNoDelay 16
+  ensure (initial.size > 0) "initial option non-empty"
+  sock.setOption ipProtoTcp tcpNoDelay initial
+  let roundtrip ← sock.getOption ipProtoTcp tcpNoDelay 16
+  ensure (roundtrip.size == initial.size) "option size stable"
+  sock.close
+
 def main : IO UInt32 := runAllSuites

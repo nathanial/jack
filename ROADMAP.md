@@ -55,7 +55,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 
 ## Phase 6: Socket Options
 
-- [ ] `Socket.setOption` / `Socket.getOption` generic interface
+- [x] `Socket.setOption` / `Socket.getOption` generic interface
 - [x] `SO_REUSEADDR` - address reuse (set by default in `new`)
 - [ ] `SO_REUSEPORT` - port reuse
 - [ ] `SO_KEEPALIVE` - TCP keepalive

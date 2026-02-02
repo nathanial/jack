@@ -7,3 +7,4 @@ import Jack.Types
 import Jack.Address
 import Jack.Socket
 import Jack.Poll
+import Jack.Options

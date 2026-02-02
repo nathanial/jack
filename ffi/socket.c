@@ -7,12 +7,35 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+
+/* ========== Socket Option Constants ========== */
+
+LEAN_EXPORT lean_obj_res jack_const_sol_socket(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SOL_SOCKET));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_so_reuseaddr(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_REUSEADDR));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipproto_tcp(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_TCP));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_tcp_nodelay(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)TCP_NODELAY));
+}
 
 /* Socket handle - just wraps a file descriptor */
 typedef struct {
@@ -706,6 +729,59 @@ LEAN_EXPORT lean_obj_res jack_socket_set_timeout(
     setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
     return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Set raw socket option */
+LEAN_EXPORT lean_obj_res jack_socket_set_option(
+    b_lean_obj_arg sock_obj,
+    uint32_t level,
+    uint32_t opt_name,
+    b_lean_obj_arg value,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = lean_sarray_size(value);
+    const uint8_t *ptr = lean_sarray_cptr(value);
+
+    if (setsockopt(sock->fd, (int)level, (int)opt_name, ptr, (socklen_t)len) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Get raw socket option */
+LEAN_EXPORT lean_obj_res jack_socket_get_option(
+    b_lean_obj_arg sock_obj,
+    uint32_t level,
+    uint32_t opt_name,
+    uint32_t max_bytes,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = (size_t)max_bytes;
+    uint8_t *buffer = malloc(len);
+    if (!buffer && len > 0) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate buffer")));
+    }
+
+    socklen_t opt_len = (socklen_t)len;
+    if (getsockopt(sock->fd, (int)level, (int)opt_name, buffer, &opt_len) < 0) {
+        int err = errno;
+        free(buffer);
+        return jack_io_error_from_errno(err);
+    }
+
+    lean_obj_res arr = lean_alloc_sarray(1, opt_len, opt_len);
+    if (opt_len > 0) {
+        memcpy(lean_sarray_cptr(arr), buffer, opt_len);
+    }
+    free(buffer);
+
+    return lean_io_result_mk_ok(arr);
 }
 
 /* ========== Non-blocking I/O ========== */
