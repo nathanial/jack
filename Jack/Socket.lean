@@ -55,6 +55,10 @@ opaque recv (sock : @& Socket) (maxBytes : UInt32) : IO ByteArray
 @[extern "jack_socket_send"]
 opaque send (sock : @& Socket) (data : @& ByteArray) : IO Unit
 
+/-- Send all data to socket, retrying until the full buffer is transmitted -/
+@[extern "jack_socket_send_all"]
+opaque sendAll (sock : @& Socket) (data : @& ByteArray) : IO Unit
+
 /-- Close the socket -/
 @[extern "jack_socket_close"]
 opaque close (sock : Socket) : IO Unit

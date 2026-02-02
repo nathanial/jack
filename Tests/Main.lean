@@ -406,7 +406,7 @@ test "TCP echo roundtrip" := do
   let clientTask ← IO.asTask do
     let client ← Socket.new
     client.connectAddr serverAddr
-    client.send "hello".toUTF8
+    client.sendAll "hello".toUTF8
     let response ← client.recv 1024
     client.close
     return response
@@ -414,7 +414,7 @@ test "TCP echo roundtrip" := do
   -- Server accepts
   let conn ← server.accept
   let data ← conn.recv 1024
-  conn.send data
+  conn.sendAll data
   conn.close
   server.close
 

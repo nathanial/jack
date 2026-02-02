@@ -487,6 +487,23 @@ LEAN_EXPORT lean_obj_res jack_socket_accept(
 
 /* ========== Send/Recv ========== */
 
+static lean_obj_res jack_socket_send_loop(jack_socket_t *sock, const uint8_t *ptr, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(sock->fd, ptr + sent, len - sent, 0);
+        if (n < 0) {
+            return jack_io_error_from_errno(errno);
+        }
+        if (n == 0) {
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Socket send returned 0 bytes")));
+        }
+        sent += (size_t)n;
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
 /* Receive data */
 LEAN_EXPORT lean_obj_res jack_socket_recv(
     b_lean_obj_arg sock_obj,
@@ -526,16 +543,21 @@ LEAN_EXPORT lean_obj_res jack_socket_send(
     size_t len = lean_sarray_size(data);
     const uint8_t *ptr = lean_sarray_cptr(data);
 
-    size_t sent = 0;
-    while (sent < len) {
-        ssize_t n = send(sock->fd, ptr + sent, len - sent, 0);
-        if (n < 0) {
-            return jack_io_error_from_errno(errno);
-        }
-        sent += n;
-    }
+    return jack_socket_send_loop(sock, ptr, len);
+}
 
-    return lean_io_result_mk_ok(lean_box(0));
+/* Send all data (retry loop) */
+LEAN_EXPORT lean_obj_res jack_socket_send_all(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    return jack_socket_send_loop(sock, ptr, len);
 }
 
 /* ========== UDP Operations ========== */

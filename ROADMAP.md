@@ -22,7 +22,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 - [x] `Socket.connect` - connect to remote host (string address)
 - [x] `Socket.connectAddr` - connect using structured address
 - [x] `Socket.send` - send bytes
-- [ ] `Socket.sendAll` - send all bytes (loop until complete)
+- [x] `Socket.sendAll` - send all bytes (loop until complete)
 - [x] `Socket.recv` - receive bytes into buffer
 - [x] `Socket.close` - close and cleanup
 - [x] Address parsing (`IPv4Addr.parse`) and structured addresses (`SockAddr`)
