@@ -102,6 +102,20 @@ def getReusePort (sock : @& Socket) : IO Bool := do
   let value ← sock.getOptionUInt32 level opt
   return value != 0
 
+/-- Enable or disable SO_KEEPALIVE on a socket. -/
+def setKeepAlive (sock : @& Socket) (enabled : Bool) : IO Unit := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soKeepAlive
+  let value : UInt32 := if enabled then 1 else 0
+  sock.setOptionUInt32 level opt value
+
+/-- Check whether SO_KEEPALIVE is enabled on a socket. -/
+def getKeepAlive (sock : @& Socket) : IO Bool := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soKeepAlive
+  let value ← sock.getOptionUInt32 level opt
+  return value != 0
+
 /-- Enable or disable IPV6_V6ONLY on an IPv6 socket. -/
 def setIPv6Only (sock : @& Socket) (enabled : Bool) : IO Unit := do
   let level ← SocketOption.ipProtoIpv6

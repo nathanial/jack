@@ -540,6 +540,16 @@ test "set/get SO_REUSEPORT" := do
   ensure (roundtrip == initial) "option roundtrip"
   sock.close
 
+test "set/get SO_KEEPALIVE" := do
+  let sock ← Socket.new
+  let solSocket ← SocketOption.solSocket
+  let soKeepAlive ← SocketOption.soKeepAlive
+  let initial ← sock.getOptionUInt32 solSocket soKeepAlive
+  sock.setOptionUInt32 solSocket soKeepAlive initial
+  let roundtrip ← sock.getOptionUInt32 solSocket soKeepAlive
+  ensure (roundtrip == initial) "option roundtrip"
+  sock.close
+
 test "set/get TCP_NODELAY" := do
   let sock ← Socket.new
   let ipProtoTcp ← SocketOption.ipProtoTcp

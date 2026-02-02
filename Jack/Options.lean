@@ -19,6 +19,10 @@ opaque soReuseAddr : IO UInt32
 @[extern "jack_const_so_reuseport"]
 opaque soReusePort : IO UInt32
 
+/-- SO_KEEPALIVE socket option. -/
+@[extern "jack_const_so_keepalive"]
+opaque soKeepAlive : IO UInt32
+
 /-- IPPROTO_TCP level constant. -/
 @[extern "jack_const_ipproto_tcp"]
 opaque ipProtoTcp : IO UInt32

@@ -3,7 +3,6 @@
 Current open issues and proposed execution order.
 
 Open issues:
-- 656 SO_KEEPALIVE socket option
 - 657 SO_RCVBUF / SO_SNDBUF socket options
 - 658 TCP_NODELAY socket option
 - 659 SO_LINGER socket option
@@ -26,21 +25,21 @@ Recently completed:
 - 652 IPv6 address parsing
 - 653 IPv6 connectivity tests
 - 655 SO_REUSEPORT socket option
+- 656 SO_KEEPALIVE socket option
 
 Recommended order:
 1) 658 TCP_NODELAY
-2) 656 SO_KEEPALIVE
-3) 657 SO_RCVBUF / SO_SNDBUF
-4) 659 SO_LINGER
-5) 663 Socket.shutdown
-6) 666 Socket pair creation
-7) 665 Scatter/gather I/O
-8) 664 Socket.sendFile
-9) 667 Out-of-band data
-10) 661 Unix abstract namespace
-11) 662 Unix socket tests
-12) 660 Async-friendly API design
-13) 671 Performance benchmarks
-14) 668 API documentation
-15) 672 Platform compatibility notes
-16) 669/670 Tutorials
+2) 657 SO_RCVBUF / SO_SNDBUF
+3) 659 SO_LINGER
+4) 663 Socket.shutdown
+5) 666 Socket pair creation
+6) 665 Scatter/gather I/O
+7) 664 Socket.sendFile
+8) 667 Out-of-band data
+9) 661 Unix abstract namespace
+10) 662 Unix socket tests
+11) 660 Async-friendly API design
+12) 671 Performance benchmarks
+13) 668 API documentation
+14) 672 Platform compatibility notes
+15) 669/670 Tutorials
