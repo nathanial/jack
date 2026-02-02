@@ -28,6 +28,11 @@ LEAN_EXPORT lean_obj_res jack_const_so_reuseaddr(lean_obj_arg world) {
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_REUSEADDR));
 }
 
+LEAN_EXPORT lean_obj_res jack_const_so_reuseport(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_REUSEPORT));
+}
+
 LEAN_EXPORT lean_obj_res jack_const_ipproto_tcp(lean_obj_arg world) {
     (void)world;
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_TCP));

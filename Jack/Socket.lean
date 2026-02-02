@@ -88,6 +88,20 @@ opaque setOptionUInt32 (sock : @& Socket) (level : UInt32) (optName : UInt32) (v
 @[extern "jack_socket_get_option_uint32"]
 opaque getOptionUInt32 (sock : @& Socket) (level : UInt32) (optName : UInt32) : IO UInt32
 
+/-- Enable or disable SO_REUSEPORT on a socket. -/
+def setReusePort (sock : @& Socket) (enabled : Bool) : IO Unit := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soReusePort
+  let value : UInt32 := if enabled then 1 else 0
+  sock.setOptionUInt32 level opt value
+
+/-- Check whether SO_REUSEPORT is enabled on a socket. -/
+def getReusePort (sock : @& Socket) : IO Bool := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soReusePort
+  let value ← sock.getOptionUInt32 level opt
+  return value != 0
+
 /-- Enable or disable IPV6_V6ONLY on an IPv6 socket. -/
 def setIPv6Only (sock : @& Socket) (enabled : Bool) : IO Unit := do
   let level ← SocketOption.ipProtoIpv6
