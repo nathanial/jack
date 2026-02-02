@@ -38,6 +38,16 @@ LEAN_EXPORT lean_obj_res jack_const_so_keepalive(lean_obj_arg world) {
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_KEEPALIVE));
 }
 
+LEAN_EXPORT lean_obj_res jack_const_so_rcvbuf(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_RCVBUF));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_so_sndbuf(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_SNDBUF));
+}
+
 LEAN_EXPORT lean_obj_res jack_const_ipproto_tcp(lean_obj_arg world) {
     (void)world;
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_TCP));

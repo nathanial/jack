@@ -116,6 +116,30 @@ def getKeepAlive (sock : @& Socket) : IO Bool := do
   let value ← sock.getOptionUInt32 level opt
   return value != 0
 
+/-- Set the receive buffer size (SO_RCVBUF). -/
+def setRecvBuf (sock : @& Socket) (bytes : UInt32) : IO Unit := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soRcvBuf
+  sock.setOptionUInt32 level opt bytes
+
+/-- Get the receive buffer size (SO_RCVBUF). -/
+def getRecvBuf (sock : @& Socket) : IO UInt32 := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soRcvBuf
+  sock.getOptionUInt32 level opt
+
+/-- Set the send buffer size (SO_SNDBUF). -/
+def setSendBuf (sock : @& Socket) (bytes : UInt32) : IO Unit := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soSndBuf
+  sock.setOptionUInt32 level opt bytes
+
+/-- Get the send buffer size (SO_SNDBUF). -/
+def getSendBuf (sock : @& Socket) : IO UInt32 := do
+  let level ← SocketOption.solSocket
+  let opt ← SocketOption.soSndBuf
+  sock.getOptionUInt32 level opt
+
 /-- Enable or disable IPV6_V6ONLY on an IPv6 socket. -/
 def setIPv6Only (sock : @& Socket) (enabled : Bool) : IO Unit := do
   let level ← SocketOption.ipProtoIpv6

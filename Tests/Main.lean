@@ -550,6 +550,21 @@ test "set/get SO_KEEPALIVE" := do
   ensure (roundtrip == initial) "option roundtrip"
   sock.close
 
+test "set/get SO_RCVBUF and SO_SNDBUF" := do
+  let sock ← Socket.new
+  let solSocket ← SocketOption.solSocket
+  let soRcvBuf ← SocketOption.soRcvBuf
+  let soSndBuf ← SocketOption.soSndBuf
+  let rcvInitial ← sock.getOptionUInt32 solSocket soRcvBuf
+  let sndInitial ← sock.getOptionUInt32 solSocket soSndBuf
+  sock.setOptionUInt32 solSocket soRcvBuf rcvInitial
+  sock.setOptionUInt32 solSocket soSndBuf sndInitial
+  let rcvRoundtrip ← sock.getOptionUInt32 solSocket soRcvBuf
+  let sndRoundtrip ← sock.getOptionUInt32 solSocket soSndBuf
+  ensure (rcvRoundtrip > 0) "recv buffer non-zero"
+  ensure (sndRoundtrip > 0) "send buffer non-zero"
+  sock.close
+
 test "set/get TCP_NODELAY" := do
   let sock ← Socket.new
   let ipProtoTcp ← SocketOption.ipProtoTcp

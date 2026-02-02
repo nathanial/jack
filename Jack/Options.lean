@@ -23,6 +23,14 @@ opaque soReusePort : IO UInt32
 @[extern "jack_const_so_keepalive"]
 opaque soKeepAlive : IO UInt32
 
+/-- SO_RCVBUF socket option. -/
+@[extern "jack_const_so_rcvbuf"]
+opaque soRcvBuf : IO UInt32
+
+/-- SO_SNDBUF socket option. -/
+@[extern "jack_const_so_sndbuf"]
+opaque soSndBuf : IO UInt32
+
 /-- IPPROTO_TCP level constant. -/
 @[extern "jack_const_ipproto_tcp"]
 opaque ipProtoTcp : IO UInt32
