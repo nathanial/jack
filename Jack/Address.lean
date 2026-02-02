@@ -58,6 +58,36 @@ def fromUInt32 (n : UInt32) : IPv4Addr :=
 
 end IPv4Addr
 
+/-- IPv6 address as 16 bytes (network order) -/
+abbrev IPv6Addr := ByteArray
+
+namespace IPv6Addr
+
+@[extern "jack_ipv6_parse"]
+opaque parseBytes (s : @& String) : ByteArray
+
+private def stripBrackets (s : String) : String :=
+  match s.toList with
+  | '[' :: rest =>
+    match rest.reverse with
+    | ']' :: innerRev => String.ofList innerRev.reverse
+    | _ => s
+  | _ => s
+
+/-- Parse an IPv6 address string like "::1" or "2001:db8::1". -/
+def parse (s : String) : Option IPv6Addr :=
+  let trimmed := stripBrackets s
+  let bytes := parseBytes trimmed
+  if bytes.size == 16 then some bytes else none
+
+/-- The "any" address :: (all interfaces). -/
+def any : IPv6Addr := ⟨#[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]⟩
+
+/-- The loopback address ::1. -/
+def loopback : IPv6Addr := ⟨#[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]⟩
+
+end IPv6Addr
+
 /-- Socket address (IPv4, IPv6, or Unix domain) -/
 inductive SockAddr where
   | ipv4 (addr : IPv4Addr) (port : UInt16)
@@ -72,9 +102,17 @@ def ipv4Any (port : UInt16) : SockAddr := .ipv4 .any port
 /-- Create IPv4 loopback address -/
 def ipv4Loopback (port : UInt16) : SockAddr := .ipv4 .loopback port
 
+/-- Create IPv6 address bound to any interface -/
+def ipv6Any (port : UInt16) : SockAddr := .ipv6 IPv6Addr.any port
+
+/-- Create IPv6 loopback address -/
+def ipv6Loopback (port : UInt16) : SockAddr := .ipv6 IPv6Addr.loopback port
+
 /-- Parse address string and port into SockAddr -/
 def fromHostPort (host : String) (port : UInt16) : Option SockAddr :=
-  (IPv4Addr.parse host).map fun addr => .ipv4 addr port
+  match IPv4Addr.parse host with
+  | some addr => some (.ipv4 addr port)
+  | none => (IPv6Addr.parse host).map fun bytes => .ipv6 bytes port
 
 /-- Get the port number (if applicable) -/
 def port : SockAddr → Option UInt16

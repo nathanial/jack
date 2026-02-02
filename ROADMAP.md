@@ -49,9 +49,9 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 
 - [x] `SockAddr.ipv6` variant (16-byte address)
 - [x] FFI support for `sockaddr_in6`
-- [ ] Dual-stack socket option (`IPV6_V6ONLY`)
-- [ ] Address parsing for IPv6
-- [ ] Tests for IPv6 connectivity
+- [x] Dual-stack socket option (`IPV6_V6ONLY`)
+- [x] Address parsing for IPv6
+- [x] Tests for IPv6 connectivity
 
 ## Phase 6: Socket Options
 

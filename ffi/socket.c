@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -35,6 +36,16 @@ LEAN_EXPORT lean_obj_res jack_const_ipproto_tcp(lean_obj_arg world) {
 LEAN_EXPORT lean_obj_res jack_const_tcp_nodelay(lean_obj_arg world) {
     (void)world;
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)TCP_NODELAY));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipproto_ipv6(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_IPV6));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipv6_v6only(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPV6_V6ONLY));
 }
 
 /* Socket handle - just wraps a file descriptor */
@@ -121,6 +132,20 @@ static lean_obj_res jack_io_error_from_errno(int err) {
 }
 
 /* ========== Address Conversion ========== */
+
+/* Parse IPv6 address string. Returns empty ByteArray on failure. */
+LEAN_EXPORT lean_obj_res jack_ipv6_parse(b_lean_obj_arg addr_str) {
+    const char *addr_cstr = lean_string_cstr(addr_str);
+    struct in6_addr addr;
+
+    if (inet_pton(AF_INET6, addr_cstr, &addr) != 1) {
+        return lean_alloc_sarray(1, 0, 0);
+    }
+
+    lean_obj_res bytes = lean_alloc_sarray(1, 16, 16);
+    memcpy(lean_sarray_cptr(bytes), &addr, 16);
+    return bytes;
+}
 
 /* Convert Lean SockAddr to C sockaddr_storage
  * Returns 0 on success, -1 on error
@@ -782,6 +807,42 @@ LEAN_EXPORT lean_obj_res jack_socket_get_option(
     free(buffer);
 
     return lean_io_result_mk_ok(arr);
+}
+
+/* Set socket option as UInt32 */
+LEAN_EXPORT lean_obj_res jack_socket_set_option_uint32(
+    b_lean_obj_arg sock_obj,
+    uint32_t level,
+    uint32_t opt_name,
+    uint32_t value,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    uint32_t opt_value = value;
+
+    if (setsockopt(sock->fd, (int)level, (int)opt_name, &opt_value, sizeof(opt_value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Get socket option as UInt32 */
+LEAN_EXPORT lean_obj_res jack_socket_get_option_uint32(
+    b_lean_obj_arg sock_obj,
+    uint32_t level,
+    uint32_t opt_name,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    uint32_t opt_value = 0;
+    socklen_t opt_len = (socklen_t)sizeof(opt_value);
+
+    if (getsockopt(sock->fd, (int)level, (int)opt_name, &opt_value, &opt_len) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box_uint32(opt_value));
 }
 
 /* ========== Non-blocking I/O ========== */

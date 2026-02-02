@@ -85,6 +85,12 @@ test "IPv4Addr parse invalid" := do
   ensure (IPv4Addr.parse "" == none) "reject empty"
   ensure (IPv4Addr.parse "1.2.3." == none) "reject trailing dot"
 
+test "IPv6Addr parsing" := do
+  let loopback : ByteArray := ⟨#[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]⟩
+  ensure (IPv6Addr.parse "::1" == some loopback) "parse loopback"
+  ensure (IPv6Addr.parse "[::1]" == some loopback) "parse bracketed loopback"
+  ensure (IPv6Addr.parse "invalid" == none) "reject invalid"
+
 test "IPv4Addr toString" := do
   ensure (IPv4Addr.loopback.toString == "127.0.0.1") "loopback to string"
   ensure (IPv4Addr.any.toString == "0.0.0.0") "any to string"
@@ -146,6 +152,12 @@ test "SockAddr fromHostPort" := do
     ensure (ip == ⟨192, 168, 1, 1⟩) "correct ip"
     ensure (port == 443) "correct port"
   | _ => ensure false "should parse"
+  let addr6 := SockAddr.fromHostPort "::1" 8080
+  match addr6 with
+  | some (.ipv6 bytes port) =>
+    ensure (bytes.size == 16) "ipv6 bytes length"
+    ensure (port == 8080) "ipv6 port"
+  | _ => ensure false "should parse ipv6"
   -- Invalid address
   ensure (SockAddr.fromHostPort "invalid" 80 == none) "reject invalid"
 
@@ -260,6 +272,20 @@ test "UDP roundtrip" := do
   -- Client receives reply
   let (reply, _) ← client.recvFrom 1024
   ensure (String.fromUTF8! reply == "pong") "client received pong"
+
+  server.close
+  client.close
+
+test "UDP IPv6 send/recv" := do
+  let server ← Socket.create .inet6 .dgram .udp
+  server.bindAddr (SockAddr.ipv6Loopback 0)
+  let serverAddr ← server.getLocalAddr
+
+  let client ← Socket.create .inet6 .dgram .udp
+  client.sendTo "hello".toUTF8 serverAddr
+
+  let (data, _fromAddr) ← server.recvFrom 1024
+  ensure (String.fromUTF8! data == "hello") "received ipv6 message"
 
   server.close
   client.close
@@ -421,6 +447,30 @@ test "TCP echo roundtrip" := do
   let response ← IO.ofExcept clientTask.get
   ensure (String.fromUTF8! response == "hello") "echo works"
 
+test "TCP IPv6 echo roundtrip" := do
+  let server ← Socket.create .inet6 .stream .tcp
+  server.setIPv6Only true
+  server.bindAddr (SockAddr.ipv6Loopback 0)
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.create .inet6 .stream .tcp
+    client.connectAddr serverAddr
+    client.sendAll "hello".toUTF8
+    let response ← client.recv 1024
+    client.close
+    return response
+
+  let conn ← server.accept
+  let data ← conn.recv 1024
+  conn.sendAll data
+  conn.close
+  server.close
+
+  let response ← IO.ofExcept clientTask.get
+  ensure (String.fromUTF8! response == "hello") "ipv6 echo works"
+
 test "connect with structured address" := do
   let server ← Socket.new
   server.bindAddr (SockAddr.ipv4Loopback 0)
@@ -489,6 +539,16 @@ test "set/get TCP_NODELAY" := do
   sock.setOption ipProtoTcp tcpNoDelay initial
   let roundtrip ← sock.getOption ipProtoTcp tcpNoDelay 16
   ensure (roundtrip.size == initial.size) "option size stable"
+  sock.close
+
+test "set/get IPV6_V6ONLY" := do
+  let sock ← Socket.create .inet6 .stream .tcp
+  let ipProtoIpv6 ← SocketOption.ipProtoIpv6
+  let ipv6V6Only ← SocketOption.ipv6V6Only
+  let initial ← sock.getOptionUInt32 ipProtoIpv6 ipv6V6Only
+  sock.setOptionUInt32 ipProtoIpv6 ipv6V6Only initial
+  let roundtrip ← sock.getOptionUInt32 ipProtoIpv6 ipv6V6Only
+  ensure (roundtrip == initial) "option roundtrip"
   sock.close
 
 def main : IO UInt32 := runAllSuites

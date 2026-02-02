@@ -23,6 +23,14 @@ opaque ipProtoTcp : IO UInt32
 @[extern "jack_const_tcp_nodelay"]
 opaque tcpNoDelay : IO UInt32
 
+/-- IPPROTO_IPV6 level constant. -/
+@[extern "jack_const_ipproto_ipv6"]
+opaque ipProtoIpv6 : IO UInt32
+
+/-- IPV6_V6ONLY socket option. -/
+@[extern "jack_const_ipv6_v6only"]
+opaque ipv6V6Only : IO UInt32
+
 end SocketOption
 
 end Jack

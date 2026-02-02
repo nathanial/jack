@@ -5,6 +5,7 @@
 import Jack.Types
 import Jack.Address
 import Jack.Error
+import Jack.Options
 
 namespace Jack
 
@@ -78,6 +79,28 @@ opaque setOption (sock : @& Socket) (level : UInt32) (optName : UInt32) (value :
 /-- Get a raw socket option value. Returns up to maxBytes from getsockopt. -/
 @[extern "jack_socket_get_option"]
 opaque getOption (sock : @& Socket) (level : UInt32) (optName : UInt32) (maxBytes : UInt32) : IO ByteArray
+
+/-- Set a socket option using a UInt32 value. -/
+@[extern "jack_socket_set_option_uint32"]
+opaque setOptionUInt32 (sock : @& Socket) (level : UInt32) (optName : UInt32) (value : UInt32) : IO Unit
+
+/-- Get a socket option as a UInt32 value. -/
+@[extern "jack_socket_get_option_uint32"]
+opaque getOptionUInt32 (sock : @& Socket) (level : UInt32) (optName : UInt32) : IO UInt32
+
+/-- Enable or disable IPV6_V6ONLY on an IPv6 socket. -/
+def setIPv6Only (sock : @& Socket) (enabled : Bool) : IO Unit := do
+  let level ← SocketOption.ipProtoIpv6
+  let opt ← SocketOption.ipv6V6Only
+  let value : UInt32 := if enabled then 1 else 0
+  sock.setOptionUInt32 level opt value
+
+/-- Check whether IPV6_V6ONLY is enabled on an IPv6 socket. -/
+def getIPv6Only (sock : @& Socket) : IO Bool := do
+  let level ← SocketOption.ipProtoIpv6
+  let opt ← SocketOption.ipv6V6Only
+  let value ← sock.getOptionUInt32 level opt
+  return value != 0
 
 /-- Get the local address the socket is bound to -/
 @[extern "jack_socket_get_local_addr"]
