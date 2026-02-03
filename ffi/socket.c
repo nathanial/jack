@@ -15,6 +15,15 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/uio.h>
+#include <sys/stat.h>
+#include <limits.h>
+#if defined(__has_include)
+#if __has_include(<sys/sendfile.h>)
+#include <sys/sendfile.h>
+#define JACK_HAVE_SENDFILE 1
+#endif
+#endif
 
 /* ========== Socket Option Constants ========== */
 
@@ -431,6 +440,69 @@ LEAN_EXPORT lean_obj_res jack_socket_create(
     return lean_io_result_mk_ok(jack_socket_box(sock));
 }
 
+/* Create a connected socket pair */
+LEAN_EXPORT lean_obj_res jack_socket_pair(
+    uint8_t family_tag,
+    uint8_t sock_type_tag,
+    uint8_t protocol_tag,
+    lean_obj_arg world
+) {
+    int af, st, proto;
+    int fds[2];
+
+    switch (family_tag) {
+        case 0: af = AF_INET; break;
+        case 1: af = AF_INET6; break;
+        case 2: af = AF_UNIX; break;
+        default: af = AF_UNIX; break;
+    }
+
+    switch (sock_type_tag) {
+        case 0: st = SOCK_STREAM; break;
+        case 1: st = SOCK_DGRAM; break;
+        default: st = SOCK_STREAM; break;
+    }
+
+    switch (protocol_tag) {
+        case 0: proto = 0; break;
+        case 1: proto = IPPROTO_TCP; break;
+        case 2: proto = IPPROTO_UDP; break;
+        default: proto = 0; break;
+    }
+
+    if (socketpair(af, st, proto, fds) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    jack_socket_t *sock_a = malloc(sizeof(jack_socket_t));
+    jack_socket_t *sock_b = malloc(sizeof(jack_socket_t));
+    if (!sock_a || !sock_b) {
+        if (sock_a) free(sock_a);
+        if (sock_b) free(sock_b);
+        close(fds[0]);
+        close(fds[1]);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate socket pair")));
+    }
+    sock_a->fd = fds[0];
+    sock_b->fd = fds[1];
+
+    if (st == SOCK_STREAM) {
+        struct timeval timeout;
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+        setsockopt(sock_a->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(sock_a->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        setsockopt(sock_b->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(sock_b->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    }
+
+    lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, jack_socket_box(sock_a));
+    lean_ctor_set(pair, 1, jack_socket_box(sock_b));
+    return lean_io_result_mk_ok(pair);
+}
+
 /* ========== Connection ========== */
 
 /* Connect socket to remote host:port */
@@ -803,6 +875,259 @@ LEAN_EXPORT lean_obj_res jack_socket_send_all(
     const uint8_t *ptr = lean_sarray_cptr(data);
 
     return jack_socket_send_loop(sock, ptr, len);
+}
+
+/* Send file contents using sendfile(). count=0 sends to EOF. */
+LEAN_EXPORT lean_obj_res jack_socket_send_file(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg path,
+    uint64_t offset_in,
+    uint64_t count_in,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    const char *path_str = lean_string_cstr(path);
+
+    int fd = open(path_str, O_RDONLY);
+    if (fd < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        int err = errno;
+        close(fd);
+        return jack_io_error_from_errno(err);
+    }
+
+    uint64_t file_size = (uint64_t)st.st_size;
+    uint64_t offset = offset_in;
+    uint64_t remaining = count_in;
+    if (remaining == 0) {
+        if (offset >= file_size) {
+            close(fd);
+            return lean_io_result_mk_ok(lean_box_uint64(0));
+        }
+        remaining = file_size - offset;
+    }
+
+    uint64_t sent_total = 0;
+
+#if defined(JACK_HAVE_SENDFILE) && defined(__linux__)
+    off_t off = (off_t)offset;
+    while (remaining > 0) {
+        size_t chunk = remaining > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)remaining;
+        ssize_t n = sendfile(sock->fd, fd, &off, chunk);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN) {
+                continue;
+            }
+            int err = errno;
+            close(fd);
+            return jack_io_error_from_errno(err);
+        }
+        if (n == 0) {
+            break;
+        }
+        sent_total += (uint64_t)n;
+        remaining -= (uint64_t)n;
+    }
+#elif defined(JACK_HAVE_SENDFILE) && defined(__APPLE__)
+    off_t off = (off_t)offset;
+    while (remaining > 0) {
+        off_t len = (off_t)(remaining > (uint64_t)INT64_MAX ? (uint64_t)INT64_MAX : remaining);
+        int rc = sendfile(fd, sock->fd, off, &len, NULL, 0);
+        if (len > 0) {
+            off += len;
+            sent_total += (uint64_t)len;
+            remaining -= (uint64_t)len;
+        }
+        if (rc == 0) {
+            break;
+        }
+        if (errno == EINTR || errno == EAGAIN) {
+            continue;
+        }
+        int err = errno;
+        close(fd);
+        return jack_io_error_from_errno(err);
+    }
+#else
+    /* Fallback: read/write loop */
+    const size_t buf_size = 65536;
+    uint8_t *buf = malloc(buf_size);
+    if (!buf) {
+        close(fd);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate sendfile buffer")));
+    }
+    if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
+        int err = errno;
+        free(buf);
+        close(fd);
+        return jack_io_error_from_errno(err);
+    }
+    while (remaining > 0) {
+        size_t chunk = remaining > buf_size ? buf_size : (size_t)remaining;
+        ssize_t r = read(fd, buf, chunk);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            int err = errno;
+            free(buf);
+            close(fd);
+            return jack_io_error_from_errno(err);
+        }
+        if (r == 0) {
+            break;
+        }
+        size_t sent = 0;
+        while (sent < (size_t)r) {
+            ssize_t w = send(sock->fd, buf + sent, (size_t)r - sent, 0);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                int err = errno;
+                free(buf);
+                close(fd);
+                return jack_io_error_from_errno(err);
+            }
+            sent += (size_t)w;
+        }
+        sent_total += (uint64_t)r;
+        remaining -= (uint64_t)r;
+    }
+    free(buf);
+#endif
+
+    close(fd);
+    return lean_io_result_mk_ok(lean_box_uint64(sent_total));
+}
+
+/* Send data from multiple buffers using sendmsg() */
+LEAN_EXPORT lean_obj_res jack_socket_send_msg(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg chunks,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(chunks);
+
+    if (count == 0) {
+        return lean_io_result_mk_ok(lean_box_uint32(0));
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    if (!iov) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate iovec array")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        lean_obj_arg chunk = lean_array_get_core(chunks, i);
+        iov[i].iov_base = (void *)lean_sarray_cptr(chunk);
+        iov[i].iov_len = (size_t)lean_sarray_size(chunk);
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+
+    ssize_t n = sendmsg(sock->fd, &msg, 0);
+    free(iov);
+
+    if (n < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
+}
+
+/* Receive data into multiple buffers using recvmsg() */
+LEAN_EXPORT lean_obj_res jack_socket_recv_msg(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg sizes,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(sizes);
+
+    if (count == 0) {
+        return lean_io_result_mk_ok(lean_alloc_array(0, 0));
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    uint8_t **buffers = malloc(count * sizeof(uint8_t *));
+    size_t *buf_sizes = malloc(count * sizeof(size_t));
+    if (!iov || !buffers || !buf_sizes) {
+        if (iov) free(iov);
+        if (buffers) free(buffers);
+        if (buf_sizes) free(buf_sizes);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate recvmsg buffers")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        uint32_t sz = lean_unbox_uint32(lean_array_get_core(sizes, i));
+        buf_sizes[i] = (size_t)sz;
+        buffers[i] = NULL;
+        if (sz > 0) {
+            buffers[i] = malloc(sz);
+            if (!buffers[i]) {
+                for (size_t j = 0; j < i; j++) {
+                    if (buffers[j]) free(buffers[j]);
+                }
+                free(iov);
+                free(buffers);
+                free(buf_sizes);
+                return lean_io_result_mk_error(lean_mk_io_user_error(
+                    lean_mk_string("Failed to allocate recvmsg buffer")));
+            }
+        }
+        iov[i].iov_base = buffers[i];
+        iov[i].iov_len = (size_t)sz;
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+
+    ssize_t n = recvmsg(sock->fd, &msg, 0);
+    if (n < 0) {
+        int err = errno;
+        for (size_t i = 0; i < count; i++) {
+            if (buffers[i]) free(buffers[i]);
+        }
+        free(iov);
+        free(buffers);
+        free(buf_sizes);
+        return jack_io_error_from_errno(err);
+    }
+
+    size_t remaining = (size_t)n;
+    lean_obj_res arr = lean_alloc_array(count, count);
+    for (size_t i = 0; i < count; i++) {
+        size_t take = 0;
+        if (remaining > 0 && buf_sizes[i] > 0) {
+            take = remaining < buf_sizes[i] ? remaining : buf_sizes[i];
+        }
+
+        lean_obj_res chunk = lean_alloc_sarray(1, take, take);
+        if (take > 0) {
+            memcpy(lean_sarray_cptr(chunk), buffers[i], take);
+            remaining -= take;
+        }
+        lean_array_set_core(arr, i, chunk);
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (buffers[i]) free(buffers[i]);
+    }
+    free(iov);
+    free(buffers);
+    free(buf_sizes);
+
+    return lean_io_result_mk_ok(arr);
 }
 
 /* Shutdown socket (half-close) */

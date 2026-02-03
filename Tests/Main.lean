@@ -509,6 +509,44 @@ test "TCP shutdown write sends EOF" := do
 
   let _ ← IO.ofExcept clientTask.get
 
+test "socket pair roundtrip" := do
+  let (a, b) ← Socket.pair .unix .stream .default
+  a.sendAll "ping".toUTF8
+  let recv1 ← b.recv 4
+  ensure (String.fromUTF8! recv1 == "ping") "b received ping"
+
+  b.sendAll "pong".toUTF8
+  let recv2 ← a.recv 4
+  ensure (String.fromUTF8! recv2 == "pong") "a received pong"
+
+  a.close
+  b.close
+
+test "sendMsg/recvMsg roundtrip" := do
+  let (a, b) ← Socket.pair .unix .stream .default
+  let _ ← a.sendMsg #["pi".toUTF8, "ng".toUTF8]
+  let parts ← b.recvMsg #[2, 2]
+  ensure (parts.size == 2) "received two parts"
+  let combined := String.fromUTF8! parts[0]! ++ String.fromUTF8! parts[1]!
+  ensure (combined == "ping") "recvMsg combined"
+  a.close
+  b.close
+
+test "sendFile sends contents" := do
+  let path : System.FilePath := "/tmp/jack_sendfile_test.txt"
+  let payload := "sendfile-test".toUTF8
+  IO.FS.writeBinFile path payload
+
+  let (a, b) ← Socket.pair .unix .stream .default
+  let sent ← a.sendFile path.toString 0 0
+  ensure (sent == UInt64.ofNat payload.size) "sendFile bytes sent"
+  let recv ← b.recv (UInt32.ofNat payload.size)
+  ensure (String.fromUTF8! recv == "sendfile-test") "sendFile received"
+  a.close
+  b.close
+
+  IO.FS.removeFile path
+
 test "TCP IPv6 echo roundtrip" := do
   let server ← Socket.create .inet6 .stream .tcp
   server.setIPv6Only true

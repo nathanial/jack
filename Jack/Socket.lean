@@ -24,6 +24,10 @@ opaque new : IO Socket
 @[extern "jack_socket_create"]
 opaque create (family : AddressFamily) (sockType : SocketType) (protocol : Protocol) : IO Socket
 
+/-- Create a connected socket pair. -/
+@[extern "jack_socket_pair"]
+opaque pair (family : AddressFamily) (sockType : SocketType) (protocol : Protocol) : IO (Socket × Socket)
+
 /-- Connect socket to a remote host and port (string address) -/
 @[extern "jack_socket_connect"]
 opaque connect (sock : @& Socket) (host : @& String) (port : UInt16) : IO Unit
@@ -79,6 +83,18 @@ opaque sendTry (sock : @& Socket) (data : @& ByteArray) : IO (SocketResult UInt3
 /-- Send all data to socket, retrying until the full buffer is transmitted -/
 @[extern "jack_socket_send_all"]
 opaque sendAll (sock : @& Socket) (data : @& ByteArray) : IO Unit
+
+/-- Send file contents to socket using sendfile(). If count=0, sends to EOF. -/
+@[extern "jack_socket_send_file"]
+opaque sendFile (sock : @& Socket) (path : @& String) (offset : UInt64) (count : UInt64) : IO UInt64
+
+/-- Send data from multiple buffers using sendmsg(). Returns bytes sent. -/
+@[extern "jack_socket_send_msg"]
+opaque sendMsg (sock : @& Socket) (chunks : @& Array ByteArray) : IO UInt32
+
+/-- Receive data into multiple buffers using recvmsg(). -/
+@[extern "jack_socket_recv_msg"]
+opaque recvMsg (sock : @& Socket) (sizes : @& Array UInt32) : IO (Array ByteArray)
 
 /-- Shutdown socket: half-close read/write sides. -/
 @[extern "jack_socket_shutdown"]
