@@ -583,6 +583,37 @@ test "out-of-band data" := do
   conn.close
   server.close
 
+test "unix abstract namespace" := do
+  let name := "jack-abstract-test"
+  let addr := SockAddr.unixAbstract name
+  let server ← try
+    let s ← Socket.create .unix .stream .default
+    s.bindAddr addr
+    s.listen 1
+    pure s
+  catch e =>
+    if toString e == "Invalid argument" || toString e == "Operation not supported" || toString e == "Invalid address" then
+      return ()
+    else
+      throw e
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.create .unix .stream .default
+    client.connectAddr addr
+    client.sendAll "ping".toUTF8
+    let response ← client.recv 4
+    client.close
+    return response
+
+  let conn ← server.accept
+  let data ← conn.recv 4
+  conn.sendAll data
+  conn.close
+  server.close
+
+  let response ← IO.ofExcept clientTask.get
+  ensure (String.fromUTF8! response == "ping") "abstract unix socket echo"
+
 test "TCP IPv6 echo roundtrip" := do
   let server ← Socket.create .inet6 .stream .tcp
   server.setIPv6Only true

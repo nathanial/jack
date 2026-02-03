@@ -18,6 +18,7 @@
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <stddef.h>
 #if defined(__has_include)
 #if __has_include(<sys/sendfile.h>)
 #include <sys/sendfile.h>
@@ -214,6 +215,7 @@ LEAN_EXPORT lean_obj_res jack_ipv6_parse(b_lean_obj_arg addr_str) {
  *   | ipv4 (addr : IPv4Addr) (port : UInt16)  -- tag 0
  *   | ipv6 (bytes : ByteArray) (port : UInt16) -- tag 1
  *   | unix (path : String)                     -- tag 2
+ *   | unixAbstract (name : String)             -- tag 3 (Linux only)
  *
  * IPv4Addr is: { a : UInt8, b : UInt8, c : UInt8, d : UInt8 }
  */
@@ -279,6 +281,26 @@ static int lean_to_sockaddr(b_lean_obj_arg addr, struct sockaddr_storage *out, s
         *len = sizeof(struct sockaddr_un);
         return 0;
     }
+    else if (tag == 3) {
+        /* unixAbstract (name : String) - Linux abstract namespace */
+#ifdef __linux__
+        lean_obj_arg name = lean_ctor_get(addr, 0);
+        const char *name_str = lean_string_cstr(name);
+        size_t name_len = strlen(name_str);
+        if (name_len + 1 > sizeof(((struct sockaddr_un *)0)->sun_path)) {
+            return -1;
+        }
+        struct sockaddr_un *sun = (struct sockaddr_un *)out;
+        sun->sun_family = AF_UNIX;
+        memset(sun->sun_path, 0, sizeof(sun->sun_path));
+        sun->sun_path[0] = '\0';
+        memcpy(sun->sun_path + 1, name_str, name_len);
+        *len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + name_len);
+        return 0;
+#else
+        return -1;
+#endif
+    }
 
     return -1;
 }
@@ -287,6 +309,7 @@ static int lean_to_sockaddr(b_lean_obj_arg addr, struct sockaddr_storage *out, s
  * SockAddr.ipv4: tag 0, 1 object field (IPv4Addr), 2 scalar bytes (UInt16 port)
  * SockAddr.ipv6: tag 1, 1 object field (ByteArray), 2 scalar bytes (UInt16 port)
  * SockAddr.unix: tag 2, 1 object field (String), 0 scalar bytes
+ * SockAddr.unixAbstract: tag 3, 1 object field (String), 0 scalar bytes
  */
 static lean_obj_res sockaddr_to_lean(struct sockaddr *addr, socklen_t len) {
     if (addr->sa_family == AF_INET && len >= sizeof(struct sockaddr_in)) {
@@ -327,6 +350,24 @@ static lean_obj_res sockaddr_to_lean(struct sockaddr *addr, socklen_t len) {
     }
     else if (addr->sa_family == AF_UNIX) {
         struct sockaddr_un *sun = (struct sockaddr_un *)addr;
+        if (sun->sun_path[0] == '\0') {
+#ifdef __linux__
+            size_t offset = offsetof(struct sockaddr_un, sun_path);
+            size_t path_len = 0;
+            if (len > (socklen_t)(offset + 1)) {
+                path_len = (size_t)len - offset - 1;
+            }
+            lean_obj_res name = lean_mk_string_from_bytes(sun->sun_path + 1, path_len);
+            lean_obj_res result = lean_alloc_ctor(3, 1, 0);
+            lean_ctor_set(result, 0, name);
+            return result;
+#else
+            /* Fallback to empty unix path on non-Linux */
+            lean_obj_res result = lean_alloc_ctor(2, 1, 0);
+            lean_ctor_set(result, 0, lean_mk_string(""));
+            return result;
+#endif
+        }
 
         /* Create SockAddr.unix: 1 object field, 0 scalar bytes */
         lean_obj_res result = lean_alloc_ctor(2, 1, 0);

@@ -93,6 +93,7 @@ inductive SockAddr where
   | ipv4 (addr : IPv4Addr) (port : UInt16)
   | ipv6 (bytes : ByteArray) (port : UInt16)  -- 16-byte address
   | unix (path : String)
+  | unixAbstract (name : String)
 
 namespace SockAddr
 
@@ -119,12 +120,14 @@ def port : SockAddr → Option UInt16
   | .ipv4 _ p => some p
   | .ipv6 _ p => some p
   | .unix _ => none
+  | .unixAbstract _ => none
 
 /-- Convert to string representation -/
 def toString : SockAddr → String
   | .ipv4 addr port => s!"{addr}:{port}"
   | .ipv6 _ port => s!"[ipv6]:{port}"
   | .unix path => s!"unix:{path}"
+  | .unixAbstract name => s!"unix:@{name}"
 
 instance : ToString SockAddr := ⟨toString⟩
 
@@ -133,6 +136,7 @@ instance : BEq SockAddr where
     | .ipv4 a1 p1, .ipv4 a2 p2 => a1 == a2 && p1 == p2
     | .ipv6 b1 p1, .ipv6 b2 p2 => b1 == b2 && p1 == p2
     | .unix p1, .unix p2 => p1 == p2
+    | .unixAbstract n1, .unixAbstract n2 => n1 == n2
     | _, _ => false
 
 end SockAddr
