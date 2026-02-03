@@ -87,7 +87,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 - [x] `Socket.sendFile` - zero-copy file transfer (where available)
 - [x] Scatter/gather I/O (`sendmsg` / `recvmsg`)
 - [x] Socket pair creation
-- [ ] Out-of-band data
+- [x] Out-of-band data
 
 ## Phase 10: Documentation and Polish
 

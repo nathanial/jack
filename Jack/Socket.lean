@@ -96,6 +96,14 @@ opaque sendMsg (sock : @& Socket) (chunks : @& Array ByteArray) : IO UInt32
 @[extern "jack_socket_recv_msg"]
 opaque recvMsg (sock : @& Socket) (sizes : @& Array UInt32) : IO (Array ByteArray)
 
+/-- Send out-of-band data (TCP urgent data). -/
+@[extern "jack_socket_send_oob"]
+opaque sendOob (sock : @& Socket) (data : @& ByteArray) : IO Unit
+
+/-- Receive out-of-band data (TCP urgent data). -/
+@[extern "jack_socket_recv_oob"]
+opaque recvOob (sock : @& Socket) (maxBytes : UInt32) : IO ByteArray
+
 /-- Shutdown socket: half-close read/write sides. -/
 @[extern "jack_socket_shutdown"]
 opaque shutdown (sock : @& Socket) (mode : ShutdownMode) : IO Unit

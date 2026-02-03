@@ -1042,6 +1042,53 @@ LEAN_EXPORT lean_obj_res jack_socket_send_msg(
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
 }
 
+/* Send out-of-band data (TCP urgent data) */
+LEAN_EXPORT lean_obj_res jack_socket_send_oob(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    ssize_t n = send(sock->fd, ptr, len, MSG_OOB);
+    if (n < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Receive out-of-band data (TCP urgent data) */
+LEAN_EXPORT lean_obj_res jack_socket_recv_oob(
+    b_lean_obj_arg sock_obj,
+    uint32_t max_bytes,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate buffer")));
+    }
+
+    ssize_t n = recv(sock->fd, buffer, max_bytes, MSG_OOB);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        return jack_io_error_from_errno(err);
+    }
+
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    return lean_io_result_mk_ok(arr);
+}
+
 /* Receive data into multiple buffers using recvmsg() */
 LEAN_EXPORT lean_obj_res jack_socket_recv_msg(
     b_lean_obj_arg sock_obj,

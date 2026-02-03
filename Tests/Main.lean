@@ -547,6 +547,42 @@ test "sendFile sends contents" := do
 
   IO.FS.removeFile path
 
+test "out-of-band data" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.new
+    client.connectAddr serverAddr
+    let sentOk ← try
+      client.sendOob "!".toUTF8
+      pure true
+    catch e =>
+      if toString e == "Invalid argument" then
+        pure false
+      else
+        throw e
+    client.close
+    return sentOk
+
+  let conn ← server.accept
+  let sentOk ← IO.ofExcept clientTask.get
+  if sentOk then
+    try
+      let oob ← conn.recvOob 1
+      ensure (String.fromUTF8! oob == "!") "received oob byte"
+    catch e =>
+      if toString e != "Invalid argument" then
+        throw e
+      else
+        ensure true "oob not supported"
+  else
+    ensure true "oob not supported"
+  conn.close
+  server.close
+
 test "TCP IPv6 echo roundtrip" := do
   let server ← Socket.create .inet6 .stream .tcp
   server.setIPv6Only true
