@@ -418,6 +418,48 @@ test "Poll.wait multiple sockets identifies correct socket" := do
   sock2.close
   sender.close
 
+-- ========== Async Tests ==========
+
+testSuite "Jack.Async"
+
+test "recvFromAsync waits for data" := do
+  let server ← Socket.create .inet .dgram .udp
+  server.bindAddr (SockAddr.ipv4Loopback 0)
+  let serverAddr ← server.getLocalAddr
+
+  let recvTask ← IO.asTask do
+    let (data, _from) ← Jack.Async.recvFromAsync server 1024
+    return data
+
+  let client ← Socket.create .inet .dgram .udp
+  client.sendTo "ping".toUTF8 serverAddr
+
+  let data ← IO.ofExcept recvTask.get
+  ensure (String.fromUTF8! data == "ping") "async recvFrom received data"
+
+  server.close
+  client.close
+
+test "connectAsync + acceptAsync" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let acceptTask ← IO.asTask do
+    let client ← Jack.Async.acceptAsync server
+    client.close
+
+  let client ← Socket.new
+  Jack.Async.connectAsync client serverAddr
+  client.close
+
+  let _ ← IO.ofExcept acceptTask.get
+  server.close
+
+test "async shutdown" := do
+  Jack.Async.shutdown
+
 -- ========== TCP Integration Tests ==========
 
 testSuite "Jack.TCP.Integration"

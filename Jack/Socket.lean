@@ -28,9 +28,17 @@ opaque create (family : AddressFamily) (sockType : SocketType) (protocol : Proto
 @[extern "jack_socket_connect"]
 opaque connect (sock : @& Socket) (host : @& String) (port : UInt16) : IO Unit
 
+/-- Connect socket to a remote host and port (non-blocking try). -/
+@[extern "jack_socket_connect_try"]
+opaque connectTry (sock : @& Socket) (host : @& String) (port : UInt16) : IO (SocketResult Unit)
+
 /-- Connect socket using structured address -/
 @[extern "jack_socket_connect_addr"]
 opaque connectAddr (sock : @& Socket) (addr : @& SockAddr) : IO Unit
+
+/-- Connect socket using structured address (non-blocking try). -/
+@[extern "jack_socket_connect_addr_try"]
+opaque connectAddrTry (sock : @& Socket) (addr : @& SockAddr) : IO (SocketResult Unit)
 
 /-- Bind socket to an address and port (string address) -/
 @[extern "jack_socket_bind"]
@@ -48,13 +56,25 @@ opaque listen (sock : @& Socket) (backlog : UInt32) : IO Unit
 @[extern "jack_socket_accept"]
 opaque accept (sock : @& Socket) : IO Socket
 
+/-- Accept a new connection (non-blocking try). -/
+@[extern "jack_socket_accept_try"]
+opaque acceptTry (sock : @& Socket) : IO (SocketResult Socket)
+
 /-- Receive data from socket, up to maxBytes -/
 @[extern "jack_socket_recv"]
 opaque recv (sock : @& Socket) (maxBytes : UInt32) : IO ByteArray
 
+/-- Receive data from socket (non-blocking try). -/
+@[extern "jack_socket_recv_try"]
+opaque recvTry (sock : @& Socket) (maxBytes : UInt32) : IO (SocketResult ByteArray)
+
 /-- Send data to socket -/
 @[extern "jack_socket_send"]
 opaque send (sock : @& Socket) (data : @& ByteArray) : IO Unit
+
+/-- Send data to socket (non-blocking try). Returns bytes sent. -/
+@[extern "jack_socket_send_try"]
+opaque sendTry (sock : @& Socket) (data : @& ByteArray) : IO (SocketResult UInt32)
 
 /-- Send all data to socket, retrying until the full buffer is transmitted -/
 @[extern "jack_socket_send_all"]
@@ -184,13 +204,25 @@ opaque getLocalAddr (sock : @& Socket) : IO SockAddr
 @[extern "jack_socket_get_peer_addr"]
 opaque getPeerAddr (sock : @& Socket) : IO SockAddr
 
+/-- Get pending socket error (SO_ERROR). None if no error. -/
+@[extern "jack_socket_get_error"]
+opaque getError (sock : @& Socket) : IO (Option SocketError)
+
 /-- Send data to a specific address (UDP) -/
 @[extern "jack_socket_send_to"]
 opaque sendTo (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) : IO Unit
 
+/-- Send data to a specific address (UDP, non-blocking try). Returns bytes sent. -/
+@[extern "jack_socket_send_to_try"]
+opaque sendToTry (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) : IO (SocketResult UInt32)
+
 /-- Receive data and sender address (UDP) -/
 @[extern "jack_socket_recv_from"]
 opaque recvFrom (sock : @& Socket) (maxBytes : UInt32) : IO (ByteArray × SockAddr)
+
+/-- Receive data and sender address (UDP, non-blocking try). -/
+@[extern "jack_socket_recv_from_try"]
+opaque recvFromTry (sock : @& Socket) (maxBytes : UInt32) : IO (SocketResult (ByteArray × SockAddr))
 
 end Socket
 

@@ -26,6 +26,28 @@ inductive SocketError where
   | unknown (errno : Int) (message : String)
   deriving Repr, BEq, Inhabited
 
+/-- Result for non-blocking socket operations. -/
+inductive SocketResult (α : Type) where
+  | ok (value : α)
+  | wouldBlock
+  | error (err : SocketError)
+  deriving Repr
+
+namespace SocketResult
+
+/-- True if the operation would block (EAGAIN/EWOULDBLOCK/EINPROGRESS). -/
+def isWouldBlock : SocketResult α → Bool
+  | .wouldBlock => true
+  | _ => false
+
+/-- Convert to Except, mapping wouldBlock to SocketError.wouldBlock. -/
+def toExcept : SocketResult α → Except SocketError α
+  | .ok value => .ok value
+  | .wouldBlock => .error .wouldBlock
+  | .error err => .error err
+
+end SocketResult
+
 namespace SocketError
 
 /-- Convert SocketError to human-readable string -/

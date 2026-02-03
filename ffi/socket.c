@@ -151,6 +151,38 @@ static lean_obj_res jack_io_error_from_errno(int err) {
         lean_mk_string(strerror(err))));
 }
 
+/* ========== SocketResult Helpers ========== */
+
+static int is_wouldblock_error(int err) {
+    if (err == EAGAIN) return 1;
+#if EAGAIN != EWOULDBLOCK
+    if (err == EWOULDBLOCK) return 1;
+#endif
+#ifdef EINPROGRESS
+    if (err == EINPROGRESS) return 1;
+#endif
+#ifdef EALREADY
+    if (err == EALREADY) return 1;
+#endif
+    return 0;
+}
+
+static lean_obj_res jack_socket_result_ok(lean_obj_res value) {
+    lean_obj_res obj = lean_alloc_ctor(0, 1, 0); /* SocketResult.ok */
+    lean_ctor_set(obj, 0, value);
+    return obj;
+}
+
+static lean_obj_res jack_socket_result_wouldblock(void) {
+    return lean_box(1); /* SocketResult.wouldBlock */
+}
+
+static lean_obj_res jack_socket_result_error(int err) {
+    lean_obj_res obj = lean_alloc_ctor(2, 1, 0); /* SocketResult.error */
+    lean_ctor_set(obj, 0, jack_make_socket_error(err));
+    return obj;
+}
+
 /* ========== Address Conversion ========== */
 
 /* Parse IPv6 address string. Returns empty ByteArray on failure. */
@@ -428,6 +460,36 @@ LEAN_EXPORT lean_obj_res jack_socket_connect(
     return lean_io_result_mk_ok(lean_box(0));
 }
 
+/* Connect socket to remote host:port (non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_connect_try(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg host,
+    uint16_t port,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    const char *host_str = lean_string_cstr(host);
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, host_str, &addr.sin_addr) <= 0) {
+        return lean_io_result_mk_ok(jack_socket_result_error(EINVAL));
+    }
+
+    if (connect(sock->fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        int err = errno;
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(lean_box(0)));
+}
+
 /* Connect socket using structured address */
 LEAN_EXPORT lean_obj_res jack_socket_connect_addr(
     b_lean_obj_arg sock_obj,
@@ -449,6 +511,32 @@ LEAN_EXPORT lean_obj_res jack_socket_connect_addr(
     }
 
     return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Connect socket using structured address (non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_connect_addr_try(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg addr,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct sockaddr_storage sa;
+    socklen_t sa_len;
+
+    if (lean_to_sockaddr(addr, &sa, &sa_len) < 0) {
+        return lean_io_result_mk_ok(jack_socket_result_error(EINVAL));
+    }
+
+    if (connect(sock->fd, (struct sockaddr *)&sa, sa_len) < 0) {
+        int err = errno;
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(lean_box(0)));
 }
 
 /* ========== Binding ========== */
@@ -553,6 +641,42 @@ LEAN_EXPORT lean_obj_res jack_socket_accept(
     return lean_io_result_mk_ok(jack_socket_box(client));
 }
 
+/* Accept a connection (non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_accept_try(
+    b_lean_obj_arg sock_obj,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+
+    int client_fd = accept(sock->fd, (struct sockaddr *)&client_addr, &addr_len);
+    if (client_fd < 0) {
+        int err = errno;
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    jack_socket_t *client = malloc(sizeof(jack_socket_t));
+    if (!client) {
+        close(client_fd);
+        return lean_io_result_mk_ok(jack_socket_result_error(ENOMEM));
+    }
+    client->fd = client_fd;
+
+    /* Set recv/send timeouts to 5 seconds on client socket */
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(jack_socket_box(client)));
+}
+
 /* ========== Send/Recv ========== */
 
 static lean_obj_res jack_socket_send_loop(jack_socket_t *sock, const uint8_t *ptr, size_t len) {
@@ -600,6 +724,36 @@ LEAN_EXPORT lean_obj_res jack_socket_recv(
     return lean_io_result_mk_ok(arr);
 }
 
+/* Receive data (non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_recv_try(
+    b_lean_obj_arg sock_obj,
+    uint32_t max_bytes,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_ok(jack_socket_result_error(ENOMEM));
+    }
+
+    ssize_t n = recv(sock->fd, buffer, max_bytes, 0);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(arr));
+}
+
 /* Send data */
 LEAN_EXPORT lean_obj_res jack_socket_send(
     b_lean_obj_arg sock_obj,
@@ -612,6 +766,29 @@ LEAN_EXPORT lean_obj_res jack_socket_send(
     const uint8_t *ptr = lean_sarray_cptr(data);
 
     return jack_socket_send_loop(sock, ptr, len);
+}
+
+/* Send data (non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_send_try(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    ssize_t n = send(sock->fd, ptr, len, 0);
+    if (n < 0) {
+        int err = errno;
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(lean_box_uint32((uint32_t)n)));
 }
 
 /* Send all data (retry loop) */
@@ -658,6 +835,37 @@ LEAN_EXPORT lean_obj_res jack_socket_send_to(
     return lean_io_result_mk_ok(lean_box(0));
 }
 
+/* Send data to specific address (UDP, non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_send_to_try(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    b_lean_obj_arg addr,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct sockaddr_storage sa;
+    socklen_t sa_len;
+
+    if (lean_to_sockaddr(addr, &sa, &sa_len) < 0) {
+        return lean_io_result_mk_ok(jack_socket_result_error(EINVAL));
+    }
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    ssize_t n = sendto(sock->fd, ptr, len, 0, (struct sockaddr *)&sa, sa_len);
+    if (n < 0) {
+        int err = errno;
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(lean_box_uint32((uint32_t)n)));
+}
+
 /* Receive data with sender address (UDP) */
 LEAN_EXPORT lean_obj_res jack_socket_recv_from(
     b_lean_obj_arg sock_obj,
@@ -699,6 +907,49 @@ LEAN_EXPORT lean_obj_res jack_socket_recv_from(
     return lean_io_result_mk_ok(pair);
 }
 
+/* Receive data with sender address (UDP, non-blocking try) */
+LEAN_EXPORT lean_obj_res jack_socket_recv_from_try(
+    b_lean_obj_arg sock_obj,
+    uint32_t max_bytes,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_ok(jack_socket_result_error(ENOMEM));
+    }
+
+    struct sockaddr_storage from_addr;
+    socklen_t from_len = sizeof(from_addr);
+
+    ssize_t n = recvfrom(sock->fd, buffer, max_bytes, 0,
+                         (struct sockaddr *)&from_addr, &from_len);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        if (is_wouldblock_error(err)) {
+            return lean_io_result_mk_ok(jack_socket_result_wouldblock());
+        }
+        return lean_io_result_mk_ok(jack_socket_result_error(err));
+    }
+
+    /* Create ByteArray */
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    /* Create SockAddr */
+    lean_obj_res lean_addr = sockaddr_to_lean((struct sockaddr *)&from_addr, from_len);
+
+    /* Create tuple (ByteArray × SockAddr) */
+    lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, arr);
+    lean_ctor_set(pair, 1, lean_addr);
+
+    return lean_io_result_mk_ok(jack_socket_result_ok(pair));
+}
+
 /* ========== Address Operations ========== */
 
 /* Get local address */
@@ -733,6 +984,28 @@ LEAN_EXPORT lean_obj_res jack_socket_get_peer_addr(
     }
 
     return lean_io_result_mk_ok(sockaddr_to_lean((struct sockaddr *)&addr, addr_len));
+}
+
+/* Get pending socket error (SO_ERROR). None if no error. */
+LEAN_EXPORT lean_obj_res jack_socket_get_error(
+    b_lean_obj_arg sock_obj,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int err = 0;
+    socklen_t len = (socklen_t)sizeof(err);
+
+    if (getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    if (err == 0) {
+        return lean_io_result_mk_ok(lean_box(0)); /* Option.none */
+    }
+
+    lean_obj_res some = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(some, 0, jack_make_socket_error(err));
+    return lean_io_result_mk_ok(some);
 }
 
 /* ========== Socket Options ========== */

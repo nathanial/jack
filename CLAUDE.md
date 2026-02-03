@@ -53,6 +53,10 @@ let (data, fromAddr) ← udp.recvFrom 1024
 sock.setNonBlocking true
 let events ← sock.poll #[.readable, .writable] 1000  -- 1s timeout
 let results ← Poll.wait entries timeoutMs             -- Multiple sockets
+
+-- Async-friendly API (poll-based)
+let _ ← Jack.Async.recvAsync sock 1024
+let _ ← Jack.Async.sendAsync sock "hello".toUTF8
 ```
 
 ## FFI Pattern

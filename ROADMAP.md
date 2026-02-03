@@ -71,7 +71,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 - [x] `Socket.poll` - poll single socket for events
 - [x] `Poll.wait` - poll multiple sockets
 - [x] `PollEvent` enum (readable, writable, error, hangup)
-- [ ] Async-friendly API design
+- [x] Async-friendly API design
 
 ## Phase 8: Unix Domain Sockets
 
