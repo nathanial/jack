@@ -845,4 +845,360 @@ test "set/get IPV6_V6ONLY" := do
   ensure (roundtrip == initial) "option roundtrip"
   sock.close
 
+-- ========== Benchmarks ==========
+
+namespace Bench
+
+def nowNs : IO Nat := IO.monoNanosNow
+
+def nsToMs (ns : Nat) : Float :=
+  (Float.ofNat ns) / 1.0e6
+
+def nsToSec (ns : Nat) : Float :=
+  (Float.ofNat ns) / 1.0e9
+
+def mbPerSec (bytes : Nat) (ns : Nat) : Float :=
+  let sec := nsToSec ns
+  if sec == 0.0 then 0.0 else (Float.ofNat bytes) / (1024.0 * 1024.0) / sec
+
+def avgNs (samples : Array Nat) : Nat :=
+  if samples.isEmpty then 0
+  else
+    let total : Nat := samples.foldl (fun acc v => acc + v) 0
+    total / samples.size
+
+def percentile (samples : Array Nat) (p : Nat) : Nat :=
+  if samples.isEmpty then 0
+  else
+    let sorted := samples.qsort (fun a b => a < b)
+    let idx := (p * (sorted.size - 1)) / 100
+    sorted[idx]!
+
+def mkBytes (size : Nat) (byte : UInt8 := 0x61) : ByteArray :=
+  ByteArray.mk (Array.ofFn (n := size) (fun _ => byte))
+
+def recvExact (recvFn : UInt32 → IO ByteArray) (total maxChunk : Nat) : IO Nat := do
+  let mut received := 0
+  let mut done := false
+  while received < total && !done do
+    let remaining := total - received
+    let chunkSize := if remaining < maxChunk then remaining else maxChunk
+    let chunk ← recvFn (UInt32.ofNat chunkSize)
+    if chunk.size == 0 then
+      done := true
+    else
+      received := received + chunk.size
+  return received
+
+end Bench
+
+open Bench
+
+testSuite "Jack.Bench"
+
+test "TCP latency ping/pong" := do
+  let iterations := 200
+  let payload := mkBytes 1 0x70
+
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let serverTask ← IO.asTask do
+    let conn ← server.accept
+    let mut i := 0
+    let mut done := false
+    while i < iterations && !done do
+      let data ← conn.recv 1
+      if data.size == 0 then
+        done := true
+      else
+        conn.sendAll data
+        i := i + 1
+    conn.close
+
+  let client ← Socket.new
+  client.connectAddr serverAddr
+
+  let mut samples : Array Nat := #[]
+  for _ in [:iterations] do
+    let start ← nowNs
+    client.sendAll payload
+    let resp ← client.recv 1
+    let stop ← nowNs
+    if resp.size == 1 then
+      samples := samples.push (stop - start)
+
+  client.close
+  let _ ← IO.ofExcept serverTask.get
+  server.close
+
+  ensure (samples.size == iterations) "latency samples collected"
+  let avg := avgNs samples
+  let p50 := percentile samples 50
+  let p95 := percentile samples 95
+  IO.println s!"TCP ping/pong {iterations} iters: avg {nsToMs avg} ms p50 {nsToMs p50} ms p95 {nsToMs p95} ms"
+
+test "TCP throughput" := do
+  let totalBytes := 4 * 1024 * 1024
+  let chunkSize := 64 * 1024
+  let fullIters := totalBytes / chunkSize
+  let remainder := totalBytes % chunkSize
+  let payload := mkBytes chunkSize 0x41
+
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let serverTask ← IO.asTask do
+    let conn ← server.accept
+    let received ← recvExact (fun n => conn.recv n) totalBytes chunkSize
+    conn.close
+    return received
+
+  let client ← Socket.new
+  client.connectAddr serverAddr
+
+  let start ← nowNs
+  for _ in [:fullIters] do
+    client.sendAll payload
+  if remainder > 0 then
+    client.sendAll (mkBytes remainder 0x42)
+  client.shutdown .write
+  let received ← IO.ofExcept serverTask.get
+  let stop ← nowNs
+
+  client.close
+  server.close
+
+  ensure (received == totalBytes) "received expected bytes"
+  let mbps := mbPerSec totalBytes (stop - start)
+  IO.println s!"TCP throughput: {mbps} MB/s ({totalBytes} bytes)"
+
+test "UDP latency and loss" := do
+  let latencyIters := 200
+  let lossIters := 1000
+  let lossWindowMs := 200
+  let lossWindowNs : Nat := lossWindowMs * 1000000
+  let payload := mkBytes 32 0x55
+
+  let server ← Socket.create .inet .dgram .udp
+  server.bindAddr (SockAddr.ipv4Loopback 0)
+  let serverAddr ← server.getLocalAddr
+
+  let serverTask ← IO.asTask do
+    for _ in [:latencyIters] do
+      let (data, fromAddr) ← server.recvFrom 256
+      server.sendTo data fromAddr
+    let start ← nowNs
+    let mut received := 0
+    let mut done := false
+    while !done do
+      let now ← nowNs
+      if now - start >= lossWindowNs then
+        done := true
+      else
+        let events ← server.poll #[.readable] 10
+        if events.contains .readable then
+          let (_data, _fromAddr) ← server.recvFrom 2048
+          received := received + 1
+    return received
+
+  let client ← Socket.create .inet .dgram .udp
+
+  let mut samples : Array Nat := #[]
+  for _ in [:latencyIters] do
+    let start ← nowNs
+    client.sendTo payload serverAddr
+    let (resp, _) ← client.recvFrom 256
+    let stop ← nowNs
+    if resp.size == payload.size then
+      samples := samples.push (stop - start)
+
+  for _ in [:lossIters] do
+    client.sendTo payload serverAddr
+
+  let receivedLoss ← IO.ofExcept serverTask.get
+
+  client.close
+  server.close
+
+  ensure (samples.size == latencyIters) "udp latency samples collected"
+  let avg := avgNs samples
+  let p50 := percentile samples 50
+  let p95 := percentile samples 95
+  let lost := lossIters - receivedLoss
+  IO.println s!"UDP ping/pong {latencyIters} iters: avg {nsToMs avg} ms p50 {nsToMs p50} ms p95 {nsToMs p95} ms"
+  IO.println s!"UDP loss window {lossWindowMs}ms: sent {lossIters} received {receivedLoss} lost {lost}"
+
+test "scatter/gather vs single buffer" := do
+  let iterations := 200
+  let partCount := 4
+  let partSize := 4096
+  let totalPer := partCount * partSize
+  let totalBytes := iterations * totalPer
+  let parts := Array.ofFn (n := partCount) (fun _ => mkBytes partSize 0x33)
+  let combined := mkBytes totalPer 0x33
+
+  let (a1, b1) ← Socket.pair .unix .stream .default
+  let recvTask1 ← IO.asTask do
+    let received ← recvExact (fun n => b1.recv n) totalBytes (64 * 1024)
+    b1.close
+    return received
+  let start1 ← nowNs
+  for _ in [:iterations] do
+    let _ ← a1.sendMsg parts
+    pure ()
+  a1.shutdown .write
+  let received1 ← IO.ofExcept recvTask1.get
+  let stop1 ← nowNs
+  a1.close
+  ensure (received1 == totalBytes) "scatter/gather received bytes"
+
+  let (a2, b2) ← Socket.pair .unix .stream .default
+  let recvTask2 ← IO.asTask do
+    let received ← recvExact (fun n => b2.recv n) totalBytes (64 * 1024)
+    b2.close
+    return received
+  let start2 ← nowNs
+  for _ in [:iterations] do
+    a2.sendAll combined
+  a2.shutdown .write
+  let received2 ← IO.ofExcept recvTask2.get
+  let stop2 ← nowNs
+  a2.close
+  ensure (received2 == totalBytes) "single buffer received bytes"
+
+  let sgMbs := mbPerSec totalBytes (stop1 - start1)
+  let singleMbs := mbPerSec totalBytes (stop2 - start2)
+  IO.println s!"scatter/gather: {sgMbs} MB/s, single buffer: {singleMbs} MB/s"
+
+test "sendFile vs user-space send" := do
+  let size := 2 * 1024 * 1024
+  let dir ← IO.FS.createTempDir
+  let path : System.FilePath := dir / "jack_bench_sendfile.bin"
+  let payload := mkBytes size 0x66
+  IO.FS.writeBinFile path payload
+
+  let (a1, b1) ← Socket.pair .unix .stream .default
+  let recvTask1 ← IO.asTask do
+    let received ← recvExact (fun n => b1.recv n) size (64 * 1024)
+    b1.close
+    return received
+  let start1 ← nowNs
+  let sent ← a1.sendFile path.toString 0 0
+  a1.shutdown .write
+  let received1 ← IO.ofExcept recvTask1.get
+  let stop1 ← nowNs
+  a1.close
+  ensure (sent == UInt64.ofNat size) "sendFile bytes sent"
+  ensure (received1 == size) "sendFile bytes received"
+
+  let (a2, b2) ← Socket.pair .unix .stream .default
+  let recvTask2 ← IO.asTask do
+    let received ← recvExact (fun n => b2.recv n) size (64 * 1024)
+    b2.close
+    return received
+  let payload2 ← IO.FS.readBinFile path
+  let start2 ← nowNs
+  a2.sendAll payload2
+  a2.shutdown .write
+  let received2 ← IO.ofExcept recvTask2.get
+  let stop2 ← nowNs
+  a2.close
+  ensure (received2 == size) "user-space bytes received"
+
+  let sendFileMbs := mbPerSec size (stop1 - start1)
+  let userMbs := mbPerSec size (stop2 - start2)
+  IO.println s!"sendFile: {sendFileMbs} MB/s, user-space: {userMbs} MB/s"
+
+  try IO.FS.removeFile path catch _ => pure ()
+  try IO.FS.removeDir dir catch _ => pure ()
+
+test "poll scalability" := do
+  let count := 128
+  let mut sockets : Array Socket := #[]
+  for _ in [:count] do
+    let s ← Socket.create .inet .dgram .udp
+    s.bindAddr (SockAddr.ipv4Loopback 0)
+    sockets := sockets.push s
+
+  match sockets[0]? with
+  | none =>
+      ensure false "poll sockets created"
+  | some target =>
+      let targetAddr ← target.getLocalAddr
+      let sender ← Socket.create .inet .dgram .udp
+      sender.sendTo "ping".toUTF8 targetAddr
+
+      let entries := sockets.map (fun s => { socket := s, events := #[.readable] : PollEntry })
+      let start ← nowNs
+      let results ← Poll.wait entries 1000
+      let stop ← nowNs
+
+      let mut found := false
+      for res in results do
+        if res.socket.fd == target.fd && res.events.contains .readable then
+          found := true
+
+      ensure (results.size >= 1) "poll returned results"
+      ensure found "poll found readable socket"
+
+      let _ ← target.recvFrom 1024
+      for s in sockets do
+        s.close
+      sender.close
+
+      IO.println s!"poll wait on {count} sockets: {nsToMs (stop - start)} ms"
+
+test "async vs blocking recv" := do
+  let totalBytes := 2 * 1024 * 1024
+  let chunkSize := 16 * 1024
+  let iterations := totalBytes / chunkSize
+  let payload := mkBytes chunkSize 0x5a
+
+  let runRecv (useAsync : Bool) : IO Nat := do
+    let server ← Socket.new
+    server.bind "127.0.0.1" 0
+    server.listen 1
+    let serverAddr ← server.getLocalAddr
+
+    let serverTask ← IO.asTask do
+      let conn ← server.accept
+      for _ in [:iterations] do
+        conn.sendAll payload
+      conn.shutdown .write
+      conn.close
+
+    let client ← Socket.new
+    if useAsync then
+      Jack.Async.connectAsync client serverAddr
+    else
+      client.connectAddr serverAddr
+
+    let start ← nowNs
+    let received ←
+      if useAsync then
+        recvExact (fun n => Jack.Async.recvAsync client n) totalBytes (64 * 1024)
+      else
+        recvExact (fun n => client.recv n) totalBytes (64 * 1024)
+    let stop ← nowNs
+
+    client.close
+    server.close
+    let _ ← IO.ofExcept serverTask.get
+
+    ensure (received == totalBytes) "received expected bytes"
+    return stop - start
+
+  let blockingNs ← runRecv false
+  let asyncNs ← runRecv true
+  Jack.Async.shutdown
+
+  let blockingMbs := mbPerSec totalBytes blockingNs
+  let asyncMbs := mbPerSec totalBytes asyncNs
+  IO.println s!"blocking recv: {blockingMbs} MB/s, async recv: {asyncMbs} MB/s"
+
 def main : IO UInt32 := runAllSuites
