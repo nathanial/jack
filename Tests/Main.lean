@@ -614,6 +614,81 @@ test "unix abstract namespace" := do
   let response ← IO.ofExcept clientTask.get
   ensure (String.fromUTF8! response == "ping") "abstract unix socket echo"
 
+test "unix socket stream roundtrip" := do
+  let dir ← IO.FS.createTempDir
+  let path : System.FilePath := dir / "jack_unix.sock"
+  let addr := SockAddr.unix path.toString
+
+  let server ← try
+    let s ← Socket.create .unix .stream .default
+    s.bindAddr addr
+    s.listen 1
+    pure s
+  catch e =>
+    if toString e == "Invalid argument" || toString e == "Operation not supported" then
+      return ()
+    else
+      throw e
+
+  let serverAddr ← server.getLocalAddr
+  ensure (serverAddr == addr) "unix server addr"
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.create .unix .stream .default
+    client.connectAddr addr
+    client.sendAll "hello".toUTF8
+    let response ← client.recv 5
+    client.close
+    return response
+
+  let conn ← server.accept
+  let data ← conn.recv 5
+  conn.sendAll data
+  conn.close
+  server.close
+
+  let response ← IO.ofExcept clientTask.get
+  ensure (String.fromUTF8! response == "hello") "unix echo works"
+
+  try IO.FS.removeFile path catch _ => pure ()
+  try IO.FS.removeDir dir catch _ => pure ()
+
+test "unix socket datagram roundtrip" := do
+  let dir ← IO.FS.createTempDir
+  let serverPath : System.FilePath := dir / "jack_unix_dgram_server.sock"
+  let clientPath : System.FilePath := dir / "jack_unix_dgram_client.sock"
+  let serverAddr := SockAddr.unix serverPath.toString
+  let clientAddr := SockAddr.unix clientPath.toString
+
+  let server ← try
+    let s ← Socket.create .unix .dgram .default
+    s.bindAddr serverAddr
+    pure s
+  catch e =>
+    if toString e == "Invalid argument" || toString e == "Operation not supported" then
+      return ()
+    else
+      throw e
+
+  let client ← Socket.create .unix .dgram .default
+  client.bindAddr clientAddr
+
+  client.sendTo "ping".toUTF8 serverAddr
+  let (data, fromAddr) ← server.recvFrom 1024
+  ensure (String.fromUTF8! data == "ping") "server received ping"
+  ensure (fromAddr == clientAddr) "client addr matches"
+
+  server.sendTo "pong".toUTF8 clientAddr
+  let (reply, _) ← client.recvFrom 1024
+  ensure (String.fromUTF8! reply == "pong") "client received pong"
+
+  server.close
+  client.close
+
+  try IO.FS.removeFile serverPath catch _ => pure ()
+  try IO.FS.removeFile clientPath catch _ => pure ()
+  try IO.FS.removeDir dir catch _ => pure ()
+
 test "TCP IPv6 echo roundtrip" := do
   let server ← Socket.create .inet6 .stream .tcp
   server.setIPv6Only true

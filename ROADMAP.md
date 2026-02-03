@@ -79,7 +79,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 - [x] `SockAddr.unix` variant with path
 - [x] FFI support for `sockaddr_un`
 - [x] Abstract namespace (Linux)
-- [ ] Unix socket tests
+- [x] Unix socket tests
 
 ## Phase 9: Advanced Features
 
