@@ -80,6 +80,10 @@ opaque sendTry (sock : @& Socket) (data : @& ByteArray) : IO (SocketResult UInt3
 @[extern "jack_socket_send_all"]
 opaque sendAll (sock : @& Socket) (data : @& ByteArray) : IO Unit
 
+/-- Shutdown socket: half-close read/write sides. -/
+@[extern "jack_socket_shutdown"]
+opaque shutdown (sock : @& Socket) (mode : ShutdownMode) : IO Unit
+
 /-- Close the socket -/
 @[extern "jack_socket_close"]
 opaque close (sock : Socket) : IO Unit

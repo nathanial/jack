@@ -54,4 +54,21 @@ def toUInt32 : Protocol → UInt32
 
 end Protocol
 
+/-- Shutdown mode for half-closing TCP sockets. -/
+inductive ShutdownMode where
+  | read   -- SHUT_RD
+  | write  -- SHUT_WR
+  | both   -- SHUT_RDWR
+  deriving Repr, BEq, Inhabited
+
+namespace ShutdownMode
+
+/-- Convert to integer value for FFI. -/
+def toUInt32 : ShutdownMode → UInt32
+  | .read => 0
+  | .write => 1
+  | .both => 2
+
+end ShutdownMode
+
 end Jack

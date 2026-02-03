@@ -489,6 +489,26 @@ test "TCP echo roundtrip" := do
   let response ← IO.ofExcept clientTask.get
   ensure (String.fromUTF8! response == "hello") "echo works"
 
+test "TCP shutdown write sends EOF" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.new
+    client.connectAddr serverAddr
+    client.shutdown .write
+    client.close
+
+  let conn ← server.accept
+  let data ← conn.recv 16
+  ensure (data.size == 0) "EOF after shutdown write"
+  conn.close
+  server.close
+
+  let _ ← IO.ofExcept clientTask.get
+
 test "TCP IPv6 echo roundtrip" := do
   let server ← Socket.create .inet6 .stream .tcp
   server.setIPv6Only true

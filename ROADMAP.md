@@ -83,7 +83,7 @@ Jack provides working IPv4/IPv6 TCP and UDP socket bindings used in production b
 
 ## Phase 9: Advanced Features
 
-- [ ] `Socket.shutdown` - half-close connections
+- [x] `Socket.shutdown` - half-close connections
 - [ ] `Socket.sendFile` - zero-copy file transfer (where available)
 - [ ] Scatter/gather I/O (`sendmsg` / `recvmsg`)
 - [ ] Socket pair creation

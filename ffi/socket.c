@@ -805,6 +805,29 @@ LEAN_EXPORT lean_obj_res jack_socket_send_all(
     return jack_socket_send_loop(sock, ptr, len);
 }
 
+/* Shutdown socket (half-close) */
+LEAN_EXPORT lean_obj_res jack_socket_shutdown(
+    b_lean_obj_arg sock_obj,
+    uint8_t mode_tag,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int how;
+
+    switch (mode_tag) {
+        case 0: how = SHUT_RD; break;
+        case 1: how = SHUT_WR; break;
+        case 2: how = SHUT_RDWR; break;
+        default: how = SHUT_RDWR; break;
+    }
+
+    if (shutdown(sock->fd, how) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
 /* ========== UDP Operations ========== */
 
 /* Send data to specific address (UDP) */
