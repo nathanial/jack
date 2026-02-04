@@ -60,6 +60,70 @@ opaque setNonBlocking (sock : @& Socket) (nonBlocking : Bool) : IO Unit
 @[extern "jack_socket_poll"]
 opaque poll (sock : @& Socket) (events : @& Array PollEvent) (timeoutMs : Int32) : IO (Array PollEvent)
 
+/-- Connect using a structured address with a timeout (milliseconds).
+    Returns `none` on timeout; socket remains non-blocking. -/
+def connectAddrWithTimeout (sock : Socket) (addr : SockAddr) (timeoutMs : Int32) : IO (Option Unit) := do
+  sock.setNonBlocking true
+  match ← sock.connectAddrTry addr with
+  | .ok _ => pure (some ())
+  | .error err => throw (IO.userError s!"Socket connect error: {err}")
+  | .wouldBlock =>
+      let events ← sock.poll #[.writable, .error, .hangup] timeoutMs
+      if events.isEmpty then
+        return none
+      match ← sock.getError with
+      | none => pure (some ())
+      | some err => throw (IO.userError s!"Socket connect error: {err}")
+
+/-- Accept a connection with a timeout (milliseconds).
+    Returns `none` on timeout; socket remains non-blocking. -/
+def acceptWithTimeout (sock : Socket) (timeoutMs : Int32) : IO (Option Socket) := do
+  sock.setNonBlocking true
+  match ← sock.acceptTry with
+  | .ok client => pure (some client)
+  | .error err => throw (IO.userError s!"Socket accept error: {err}")
+  | .wouldBlock =>
+      let events ← sock.poll #[.readable, .error, .hangup] timeoutMs
+      if events.isEmpty then
+        return none
+      match ← sock.acceptTry with
+      | .ok client => pure (some client)
+      | .wouldBlock => pure none
+      | .error err => throw (IO.userError s!"Socket accept error: {err}")
+
+/-- Connect to a host and port with a timeout (milliseconds) per address.
+    Returns `none` if all candidates time out. -/
+def connectHostPortWithTimeout (host : String) (port : UInt16) (timeoutMs : Int32) : IO (Option Socket) := do
+  let addrs ← SockAddr.resolveHostPort host port
+  if addrs.isEmpty then
+    throw (IO.userError s!"No addresses resolved for {host}:{port}")
+  let mut lastErr : Option String := none
+  for addr in addrs do
+    let family? : Option AddressFamily :=
+      match addr with
+      | .ipv4 _ _ => some .inet
+      | .ipv6 _ _ => some .inet6
+      | _ => none
+    match family? with
+    | none => pure ()
+    | some family =>
+        let sock ← Socket.create family .stream .tcp
+        let outcome ← try
+          let res ← connectAddrWithTimeout sock addr timeoutMs
+          pure (Except.ok res)
+        catch e =>
+          pure (Except.error (toString e))
+        match outcome with
+        | .ok (some ()) => return some sock
+        | .ok none =>
+            Socket.close sock
+        | .error msg =>
+            lastErr := some msg
+            Socket.close sock
+  match lastErr with
+  | some msg => throw (IO.userError s!"Failed to connect to {host}:{port}: {msg}")
+  | none => pure none
+
 end Socket
 
 namespace Poll

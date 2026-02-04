@@ -267,6 +267,67 @@ test "connectHostPort resolves IPv4/IPv6" := do
 
   let _ ← IO.ofExcept clientTask.get
 
+test "connectAddrWithTimeout succeeds" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let client ← Socket.new
+  let result ← Socket.connectAddrWithTimeout client serverAddr 1000
+  match result with
+  | some _ =>
+      let conn ← server.accept
+      conn.close
+      client.close
+      server.close
+  | none =>
+      client.close
+      server.close
+      ensure false "connect timed out"
+
+test "acceptWithTimeout returns none then some" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+
+  let first ← Socket.acceptWithTimeout server 10
+  ensure first.isNone "no client yet"
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.new
+    client.connectAddr serverAddr
+    client.close
+
+  let second ← Socket.acceptWithTimeout server 1000
+  match second with
+  | some conn => conn.close
+  | none => ensure false "expected connection"
+
+  server.close
+  let _ ← IO.ofExcept clientTask.get
+
+test "connectHostPortWithTimeout resolves and connects" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+  let port := match serverAddr with
+    | .ipv4 _ p => p
+    | _ => 0
+
+  let result ← Socket.connectHostPortWithTimeout "localhost" port 1000
+  match result with
+  | some client =>
+      let conn ← server.accept
+      conn.close
+      client.close
+      server.close
+  | none =>
+      server.close
+      ensure false "connect timed out"
+
 test "get local address after bind" := do
   let sock ← Socket.new
   sock.bind "127.0.0.1" 0
