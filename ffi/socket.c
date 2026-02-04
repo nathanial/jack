@@ -60,6 +60,52 @@ LEAN_EXPORT lean_obj_res jack_const_so_sndbuf(lean_obj_arg world) {
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_SNDBUF));
 }
 
+LEAN_EXPORT lean_obj_res jack_const_so_broadcast(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)SO_BROADCAST));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipproto_ip(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_IP));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ip_multicast_ttl(lean_obj_arg world) {
+    (void)world;
+#ifdef IP_MULTICAST_TTL
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IP_MULTICAST_TTL));
+#else
+    return lean_io_result_mk_ok(lean_box_uint32(0));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ip_multicast_loop(lean_obj_arg world) {
+    (void)world;
+#ifdef IP_MULTICAST_LOOP
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IP_MULTICAST_LOOP));
+#else
+    return lean_io_result_mk_ok(lean_box_uint32(0));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipv6_multicast_hops(lean_obj_arg world) {
+    (void)world;
+#ifdef IPV6_MULTICAST_HOPS
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPV6_MULTICAST_HOPS));
+#else
+    return lean_io_result_mk_ok(lean_box_uint32(0));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_const_ipv6_multicast_loop(lean_obj_arg world) {
+    (void)world;
+#ifdef IPV6_MULTICAST_LOOP
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPV6_MULTICAST_LOOP));
+#else
+    return lean_io_result_mk_ok(lean_box_uint32(0));
+#endif
+}
+
 LEAN_EXPORT lean_obj_res jack_const_ipproto_tcp(lean_obj_arg world) {
     (void)world;
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPPROTO_TCP));
@@ -528,6 +574,224 @@ LEAN_EXPORT lean_obj_res jack_fd_close(
         return jack_io_error_from_errno(errno);
     }
     return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* ========== Multicast/Broadcast Helpers ========== */
+
+static int lean_ipv4_to_in_addr(b_lean_obj_arg ipv4, struct in_addr *out) {
+    if (!ipv4 || !out) return -1;
+    uint8_t a = lean_ctor_get_uint8(ipv4, 0);
+    uint8_t b = lean_ctor_get_uint8(ipv4, 1);
+    uint8_t c = lean_ctor_get_uint8(ipv4, 2);
+    uint8_t d = lean_ctor_get_uint8(ipv4, 3);
+    uint32_t ip = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)c << 8) | (uint32_t)d;
+    out->s_addr = htonl(ip);
+    return 0;
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_set_broadcast(
+    b_lean_obj_arg sock_obj,
+    uint8_t enabled,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int opt = enabled ? 1 : 0;
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_set_multicast_ttl(
+    b_lean_obj_arg sock_obj,
+    uint8_t ttl,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#ifdef IP_MULTICAST_TTL
+    if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_set_multicast_loop(
+    b_lean_obj_arg sock_obj,
+    uint8_t enabled,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#ifdef IP_MULTICAST_LOOP
+    uint8_t value = enabled ? 1 : 0;
+    if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_LOOP, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_join_multicast(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg group_obj,
+    b_lean_obj_arg iface_obj,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    struct ip_mreq mreq;
+
+    if (lean_ipv4_to_in_addr(group_obj, &mreq.imr_multiaddr) < 0 ||
+        lean_ipv4_to_in_addr(iface_obj, &mreq.imr_interface) < 0) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Invalid IPv4 address")));
+    }
+
+    if (setsockopt(sock->fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_leave_multicast(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg group_obj,
+    b_lean_obj_arg iface_obj,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    struct ip_mreq mreq;
+
+    if (lean_ipv4_to_in_addr(group_obj, &mreq.imr_multiaddr) < 0 ||
+        lean_ipv4_to_in_addr(iface_obj, &mreq.imr_interface) < 0) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Invalid IPv4 address")));
+    }
+
+    if (setsockopt(sock->fd, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+#if defined(IPV6_JOIN_GROUP)
+#define JACK_IPV6_JOIN IPV6_JOIN_GROUP
+#elif defined(IPV6_ADD_MEMBERSHIP)
+#define JACK_IPV6_JOIN IPV6_ADD_MEMBERSHIP
+#endif
+
+#if defined(IPV6_LEAVE_GROUP)
+#define JACK_IPV6_LEAVE IPV6_LEAVE_GROUP
+#elif defined(IPV6_DROP_MEMBERSHIP)
+#define JACK_IPV6_LEAVE IPV6_DROP_MEMBERSHIP
+#endif
+
+LEAN_EXPORT lean_obj_res jack_socket_join_multicast6(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg group_bytes,
+    uint32_t ifindex,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#if defined(JACK_IPV6_JOIN)
+    if (lean_sarray_size(group_bytes) != 16) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Invalid IPv6 address bytes")));
+    }
+    struct ipv6_mreq mreq;
+    memset(&mreq, 0, sizeof(mreq));
+    memcpy(&mreq.ipv6mr_multiaddr, lean_sarray_cptr(group_bytes), 16);
+    mreq.ipv6mr_interface = (unsigned int)ifindex;
+
+    if (setsockopt(sock->fd, IPPROTO_IPV6, JACK_IPV6_JOIN, &mreq, sizeof(mreq)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    (void)group_bytes;
+    (void)ifindex;
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_leave_multicast6(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg group_bytes,
+    uint32_t ifindex,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#if defined(JACK_IPV6_LEAVE)
+    if (lean_sarray_size(group_bytes) != 16) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Invalid IPv6 address bytes")));
+    }
+    struct ipv6_mreq mreq;
+    memset(&mreq, 0, sizeof(mreq));
+    memcpy(&mreq.ipv6mr_multiaddr, lean_sarray_cptr(group_bytes), 16);
+    mreq.ipv6mr_interface = (unsigned int)ifindex;
+
+    if (setsockopt(sock->fd, IPPROTO_IPV6, JACK_IPV6_LEAVE, &mreq, sizeof(mreq)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    (void)group_bytes;
+    (void)ifindex;
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_set_multicast_hops6(
+    b_lean_obj_arg sock_obj,
+    uint8_t hops,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#ifdef IPV6_MULTICAST_HOPS
+    int value = (int)hops;
+    if (setsockopt(sock->fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+LEAN_EXPORT lean_obj_res jack_socket_set_multicast_loop6(
+    b_lean_obj_arg sock_obj,
+    uint8_t enabled,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+#ifdef IPV6_MULTICAST_LOOP
+    uint8_t value = enabled ? 1 : 0;
+    if (setsockopt(sock->fd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
 }
 
 /* ========== Socket Creation ========== */

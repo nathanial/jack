@@ -31,6 +31,22 @@ opaque soRcvBuf : IO UInt32
 @[extern "jack_const_so_sndbuf"]
 opaque soSndBuf : IO UInt32
 
+/-- SO_BROADCAST socket option. -/
+@[extern "jack_const_so_broadcast"]
+opaque soBroadcast : IO UInt32
+
+/-- IPPROTO_IP level constant. -/
+@[extern "jack_const_ipproto_ip"]
+opaque ipProtoIp : IO UInt32
+
+/-- IP_MULTICAST_TTL option. -/
+@[extern "jack_const_ip_multicast_ttl"]
+opaque ipMulticastTtl : IO UInt32
+
+/-- IP_MULTICAST_LOOP option. -/
+@[extern "jack_const_ip_multicast_loop"]
+opaque ipMulticastLoop : IO UInt32
+
 /-- IPPROTO_TCP level constant. -/
 @[extern "jack_const_ipproto_tcp"]
 opaque ipProtoTcp : IO UInt32
@@ -46,6 +62,14 @@ opaque ipProtoIpv6 : IO UInt32
 /-- IPV6_V6ONLY socket option. -/
 @[extern "jack_const_ipv6_v6only"]
 opaque ipv6V6Only : IO UInt32
+
+/-- IPV6_MULTICAST_HOPS option. -/
+@[extern "jack_const_ipv6_multicast_hops"]
+opaque ipv6MulticastHops : IO UInt32
+
+/-- IPV6_MULTICAST_LOOP option. -/
+@[extern "jack_const_ipv6_multicast_loop"]
+opaque ipv6MulticastLoop : IO UInt32
 
 end SocketOption
 

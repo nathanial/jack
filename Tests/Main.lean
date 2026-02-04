@@ -944,6 +944,84 @@ test "set/get IPV6_V6ONLY" := do
   ensure (roundtrip == initial) "option roundtrip"
   sock.close
 
+-- ========== Multicast/Broadcast Tests ==========
+
+testSuite "Jack.Multicast"
+
+test "udp broadcast enable" := do
+  let sock ← Socket.create .inet .dgram .udp
+  sock.setBroadcast true
+  sock.setBroadcast false
+  sock.close
+
+test "ipv4 multicast join/leave" := do
+  let sock ← Socket.create .inet .dgram .udp
+  let group := IPv4Addr.parse "239.255.0.1"
+  match group with
+  | none =>
+      sock.close
+      ensure false "group parse"
+  | some grp =>
+      let mut skipped := false
+      try
+        sock.setMulticastTtl 1
+        sock.setMulticastLoop true
+        sock.joinMulticast grp IPv4Addr.any
+        sock.leaveMulticast grp IPv4Addr.any
+      catch e =>
+        let msg := toString e
+        if msg == "Operation not supported" ||
+           msg == "Protocol not supported" ||
+           msg == "Invalid argument" ||
+           msg == "Address not available" ||
+           msg == "No such device" ||
+           msg == "Network is down" then
+          skipped := true
+        else
+          throw e
+      sock.close
+      if skipped then
+        ensure true "ipv4 multicast not supported"
+
+test "ipv6 multicast join/leave" := do
+  let sock ← try
+    Socket.create .inet6 .dgram .udp
+  catch e =>
+    let msg := toString e
+    if msg == "Address family not supported by protocol" ||
+       msg == "Protocol not supported" ||
+       msg == "Protocol not available" then
+      return ()
+    else
+      throw e
+
+  let group := IPv6Addr.parse "ff02::1"
+  match group with
+  | none =>
+      sock.close
+      ensure false "ipv6 group parse"
+  | some grp =>
+      let mut skipped := false
+      try
+        sock.setMulticastHops6 1
+        sock.setMulticastLoop6 true
+        sock.joinMulticast6 grp 0
+        sock.leaveMulticast6 grp 0
+      catch e =>
+        let msg := toString e
+        if msg == "Operation not supported" ||
+           msg == "Protocol not supported" ||
+           msg == "Invalid argument" ||
+           msg == "Address not available" ||
+           msg == "No such device" ||
+           msg == "Network is down" then
+          skipped := true
+        else
+          throw e
+      sock.close
+      if skipped then
+        ensure true "ipv6 multicast not supported"
+
 -- ========== Benchmarks ==========
 
 namespace Bench

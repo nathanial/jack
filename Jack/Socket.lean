@@ -298,6 +298,50 @@ def getIPv6Only (sock : @& Socket) : IO Bool := do
   let value ← sock.getOptionUInt32 level opt
   return value != 0
 
+/-- Enable or disable SO_BROADCAST on a socket. -/
+@[extern "jack_socket_set_broadcast"]
+opaque setBroadcast (sock : @& Socket) (enabled : Bool) : IO Unit
+
+/-- Set IPv4 multicast TTL (IP_MULTICAST_TTL). -/
+@[extern "jack_socket_set_multicast_ttl"]
+opaque setMulticastTtl (sock : @& Socket) (ttl : UInt8) : IO Unit
+
+/-- Enable or disable IPv4 multicast loopback (IP_MULTICAST_LOOP). -/
+@[extern "jack_socket_set_multicast_loop"]
+opaque setMulticastLoop (sock : @& Socket) (enabled : Bool) : IO Unit
+
+/-- Join an IPv4 multicast group (IP_ADD_MEMBERSHIP). -/
+@[extern "jack_socket_join_multicast"]
+opaque joinMulticastRaw (sock : @& Socket) (group : @& IPv4Addr) (iface : @& IPv4Addr) : IO Unit
+
+/-- Leave an IPv4 multicast group (IP_DROP_MEMBERSHIP). -/
+@[extern "jack_socket_leave_multicast"]
+opaque leaveMulticastRaw (sock : @& Socket) (group : @& IPv4Addr) (iface : @& IPv4Addr) : IO Unit
+
+/-- Join IPv4 multicast group using interface (default 0.0.0.0). -/
+def joinMulticast (sock : @& Socket) (group : IPv4Addr) (iface : IPv4Addr := IPv4Addr.any) : IO Unit :=
+  joinMulticastRaw sock group iface
+
+/-- Leave IPv4 multicast group using interface (default 0.0.0.0). -/
+def leaveMulticast (sock : @& Socket) (group : IPv4Addr) (iface : IPv4Addr := IPv4Addr.any) : IO Unit :=
+  leaveMulticastRaw sock group iface
+
+/-- Join an IPv6 multicast group (IPV6_JOIN_GROUP). -/
+@[extern "jack_socket_join_multicast6"]
+opaque joinMulticast6 (sock : @& Socket) (group : @& ByteArray) (ifIndex : UInt32) : IO Unit
+
+/-- Leave an IPv6 multicast group (IPV6_LEAVE_GROUP). -/
+@[extern "jack_socket_leave_multicast6"]
+opaque leaveMulticast6 (sock : @& Socket) (group : @& ByteArray) (ifIndex : UInt32) : IO Unit
+
+/-- Set IPv6 multicast hop limit (IPV6_MULTICAST_HOPS). -/
+@[extern "jack_socket_set_multicast_hops6"]
+opaque setMulticastHops6 (sock : @& Socket) (hops : UInt8) : IO Unit
+
+/-- Enable or disable IPv6 multicast loopback (IPV6_MULTICAST_LOOP). -/
+@[extern "jack_socket_set_multicast_loop6"]
+opaque setMulticastLoop6 (sock : @& Socket) (enabled : Bool) : IO Unit
+
 /-- Get the local address the socket is bound to -/
 @[extern "jack_socket_get_local_addr"]
 opaque getLocalAddr (sock : @& Socket) : IO SockAddr
