@@ -109,6 +109,14 @@ def ipv6Any (port : UInt16) : SockAddr := .ipv6 IPv6Addr.any port
 /-- Create IPv6 loopback address -/
 def ipv6Loopback (port : UInt16) : SockAddr := .ipv6 IPv6Addr.loopback port
 
+/-- Resolve a host and port into concrete socket addresses (IPv4/IPv6). -/
+@[extern "jack_resolve_host_port"]
+opaque resolveHostPort (host : @& String) (port : UInt16) : IO (Array SockAddr)
+
+/-- Resolve a host into concrete socket addresses with port 0. -/
+def resolveHost (host : String) : IO (Array SockAddr) :=
+  resolveHostPort host 0
+
 /-- Parse address string and port into SockAddr -/
 def fromHostPort (host : String) (port : UInt16) : Option SockAddr :=
   match IPv4Addr.parse host with

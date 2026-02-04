@@ -10,11 +10,13 @@
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdio.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -386,6 +388,65 @@ static lean_obj_res sockaddr_to_lean(struct sockaddr *addr, socklen_t len) {
     lean_ctor_set(result, 0, ipv4);
     lean_ctor_set_uint16(result, sizeof(void*), 0);
     return result;
+}
+
+/* ========== DNS Resolution ========== */
+
+LEAN_EXPORT lean_obj_res jack_resolve_host_port(
+    b_lean_obj_arg host,
+    uint16_t port,
+    lean_obj_arg world
+) {
+    (void)world;
+
+    const char *host_str = lean_string_cstr(host);
+    if (!host_str || host_str[0] == '\0') {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Host is empty")));
+    }
+
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = 0;
+    hints.ai_flags = AI_NUMERICSERV;
+#ifdef AI_ADDRCONFIG
+    hints.ai_flags |= AI_ADDRCONFIG;
+#endif
+
+    struct addrinfo *res = NULL;
+    int rc = getaddrinfo(host_str, port_str, &hints, &res);
+    if (rc != 0) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string(gai_strerror(rc))));
+    }
+
+    size_t count = 0;
+    for (struct addrinfo *cur = res; cur != NULL; cur = cur->ai_next) {
+        if (cur->ai_family == AF_INET || cur->ai_family == AF_INET6) {
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        freeaddrinfo(res);
+        return lean_io_result_mk_ok(lean_alloc_array(0, 0));
+    }
+
+    lean_obj_res arr = lean_alloc_array(count, count);
+    size_t idx = 0;
+    for (struct addrinfo *cur = res; cur != NULL; cur = cur->ai_next) {
+        if (cur->ai_family == AF_INET || cur->ai_family == AF_INET6) {
+            lean_obj_res addr = sockaddr_to_lean(cur->ai_addr, (socklen_t)cur->ai_addrlen);
+            lean_array_set_core(arr, idx++, addr);
+        }
+    }
+
+    freeaddrinfo(res);
+    return lean_io_result_mk_ok(arr);
 }
 
 /* ========== Socket Creation ========== */

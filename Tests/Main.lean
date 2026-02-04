@@ -161,6 +161,21 @@ test "SockAddr fromHostPort" := do
   -- Invalid address
   ensure (SockAddr.fromHostPort "invalid" 80 == none) "reject invalid"
 
+test "SockAddr resolveHostPort" := do
+  let addrs ← SockAddr.resolveHostPort "localhost" 80
+  ensure (addrs.size > 0) "resolved at least one addr"
+  let mut sawInet := false
+  for addr in addrs do
+    match addr with
+    | .ipv4 _ port =>
+        ensure (port == 80) "ipv4 port matches"
+        sawInet := true
+    | .ipv6 _ port =>
+        ensure (port == 80) "ipv6 port matches"
+        sawInet := true
+    | _ => pure ()
+  ensure sawInet "resolved inet address"
+
 -- ========== Socket Tests ==========
 
 testSuite "Jack.Socket"
@@ -1082,36 +1097,42 @@ test "sendFile vs user-space send" := do
   let payload := mkBytes size 0x66
   IO.FS.writeBinFile path payload
 
-  let (a1, b1) ← Socket.pair .unix .stream .default
-  let recvTask1 ← IO.asTask do
-    let received ← recvExact (fun n => b1.recv n) size (64 * 1024)
-    b1.close
-    return received
-  let start1 ← nowNs
-  let sent ← a1.sendFile path.toString 0 0
-  a1.shutdown .write
-  let received1 ← IO.ofExcept recvTask1.get
-  let stop1 ← nowNs
-  a1.close
-  ensure (sent == UInt64.ofNat size) "sendFile bytes sent"
-  ensure (received1 == size) "sendFile bytes received"
+  let runTcpSend (useSendFile : Bool) : IO Nat := do
+    let server ← Socket.new
+    server.bind "127.0.0.1" 0
+    server.listen 1
+    let serverAddr ← server.getLocalAddr
 
-  let (a2, b2) ← Socket.pair .unix .stream .default
-  let recvTask2 ← IO.asTask do
-    let received ← recvExact (fun n => b2.recv n) size (64 * 1024)
-    b2.close
-    return received
-  let payload2 ← IO.FS.readBinFile path
-  let start2 ← nowNs
-  a2.sendAll payload2
-  a2.shutdown .write
-  let received2 ← IO.ofExcept recvTask2.get
-  let stop2 ← nowNs
-  a2.close
-  ensure (received2 == size) "user-space bytes received"
+    let recvTask ← IO.asTask do
+      let conn ← server.accept
+      let received ← recvExact (fun n => conn.recv n) size (64 * 1024)
+      conn.close
+      return received
 
-  let sendFileMbs := mbPerSec size (stop1 - start1)
-  let userMbs := mbPerSec size (stop2 - start2)
+    let client ← Socket.new
+    client.connectAddr serverAddr
+
+    let start ← nowNs
+    if useSendFile then
+      let sent ← client.sendFile path.toString 0 0
+      ensure (sent == UInt64.ofNat size) "sendFile bytes sent"
+    else
+      let payload2 ← IO.FS.readBinFile path
+      client.sendAll payload2
+    client.shutdown .write
+    let received ← IO.ofExcept recvTask.get
+    let stop ← nowNs
+
+    client.close
+    server.close
+    ensure (received == size) "bytes received"
+    return stop - start
+
+  let sendFileNs ← runTcpSend true
+  let userNs ← runTcpSend false
+
+  let sendFileMbs := mbPerSec size sendFileNs
+  let userMbs := mbPerSec size userNs
   IO.println s!"sendFile: {sendFileMbs} MB/s, user-space: {userMbs} MB/s"
 
   try IO.FS.removeFile path catch _ => pure ()
