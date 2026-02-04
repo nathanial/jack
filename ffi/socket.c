@@ -478,6 +478,58 @@ LEAN_EXPORT lean_obj_res jack_resolve_host_port(
     return lean_io_result_mk_ok(arr);
 }
 
+/* ========== FD Helpers (tests) ========== */
+
+LEAN_EXPORT lean_obj_res jack_fd_open(
+    b_lean_obj_arg path,
+    lean_obj_arg world
+) {
+    (void)world;
+    const char *path_str = lean_string_cstr(path);
+    int fd = open(path_str, O_RDONLY);
+    if (fd < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)fd));
+}
+
+LEAN_EXPORT lean_obj_res jack_fd_read(
+    uint32_t fd,
+    uint32_t max_bytes,
+    lean_obj_arg world
+) {
+    (void)world;
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate buffer")));
+    }
+
+    ssize_t n = read((int)fd, buffer, max_bytes);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        return jack_io_error_from_errno(err);
+    }
+
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    return lean_io_result_mk_ok(arr);
+}
+
+LEAN_EXPORT lean_obj_res jack_fd_close(
+    uint32_t fd,
+    lean_obj_arg world
+) {
+    (void)world;
+    if (close((int)fd) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
 /* ========== Socket Creation ========== */
 
 /* Create a new TCP socket */
@@ -1221,6 +1273,135 @@ LEAN_EXPORT lean_obj_res jack_socket_send_msg(
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
 }
 
+/* Send data from multiple buffers using sendmsg() with control messages */
+LEAN_EXPORT lean_obj_res jack_socket_send_msg_control(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg chunks,
+    b_lean_obj_arg control,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(chunks);
+
+    if (count == 0) {
+        return lean_io_result_mk_ok(lean_box_uint32(0));
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    if (!iov) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate iovec array")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        lean_obj_arg chunk = lean_array_get_core(chunks, i);
+        iov[i].iov_base = (void *)lean_sarray_cptr(chunk);
+        iov[i].iov_len = (size_t)lean_sarray_size(chunk);
+    }
+
+    lean_obj_arg fds_arr = lean_ctor_get(control, 0);
+    lean_obj_arg cred_opt = lean_ctor_get(control, 1);
+    size_t fd_count = lean_array_size(fds_arr);
+
+    int has_cred = 0;
+#if defined(SCM_CREDENTIALS)
+    struct ucred cred;
+#endif
+    if (lean_obj_tag(cred_opt) == 1) {
+#if defined(SCM_CREDENTIALS)
+        lean_obj_arg cred_obj = lean_ctor_get(cred_opt, 0);
+        uint32_t pid = lean_ctor_get_uint32(cred_obj, 0);
+        uint32_t uid = lean_ctor_get_uint32(cred_obj, sizeof(uint32_t));
+        uint32_t gid = lean_ctor_get_uint32(cred_obj, 2 * sizeof(uint32_t));
+        cred.pid = (pid_t)pid;
+        cred.uid = (uid_t)uid;
+        cred.gid = (gid_t)gid;
+        has_cred = 1;
+#else
+        free(iov);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("SCM_CREDENTIALS not supported")));
+#endif
+    }
+
+    size_t control_len = 0;
+    if (fd_count > 0) {
+        control_len += CMSG_SPACE(fd_count * sizeof(int));
+    }
+    if (has_cred) {
+#if defined(SCM_CREDENTIALS)
+        control_len += CMSG_SPACE(sizeof(struct ucred));
+#endif
+    }
+
+    char *control_buf = NULL;
+    if (control_len > 0) {
+        control_buf = malloc(control_len);
+        if (!control_buf) {
+            free(iov);
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Failed to allocate control buffer")));
+        }
+        memset(control_buf, 0, control_len);
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+    msg.msg_control = control_buf;
+    msg.msg_controllen = control_len;
+
+    struct cmsghdr *cmsg = NULL;
+    if (control_len > 0) {
+        cmsg = CMSG_FIRSTHDR(&msg);
+    }
+
+    if (fd_count > 0) {
+        if (!cmsg) {
+            free(iov);
+            if (control_buf) free(control_buf);
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Failed to build SCM_RIGHTS header")));
+        }
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(fd_count * sizeof(int));
+
+        int *fds = (int *)CMSG_DATA(cmsg);
+        for (size_t i = 0; i < fd_count; i++) {
+            uint32_t fd = lean_unbox_uint32(lean_array_get_core(fds_arr, i));
+            fds[i] = (int)fd;
+        }
+        cmsg = CMSG_NXTHDR(&msg, cmsg);
+    }
+
+    if (has_cred) {
+#if defined(SCM_CREDENTIALS)
+        if (!cmsg) {
+            free(iov);
+            if (control_buf) free(control_buf);
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Failed to build SCM_CREDENTIALS header")));
+        }
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_CREDENTIALS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(struct ucred));
+        memcpy(CMSG_DATA(cmsg), &cred, sizeof(struct ucred));
+#endif
+    }
+
+    ssize_t n = sendmsg(sock->fd, &msg, 0);
+    free(iov);
+    if (control_buf) free(control_buf);
+
+    if (n < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
+}
+
 /* Send data from multiple buffers using sendmsg() with flags */
 LEAN_EXPORT lean_obj_res jack_socket_send_msg_flags(
     b_lean_obj_arg sock_obj,
@@ -1395,6 +1576,210 @@ LEAN_EXPORT lean_obj_res jack_socket_recv_msg(
     free(buf_sizes);
 
     return lean_io_result_mk_ok(arr);
+}
+
+/* Receive data into multiple buffers using recvmsg() with control messages */
+LEAN_EXPORT lean_obj_res jack_socket_recv_msg_control(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg sizes,
+    uint32_t max_fds,
+    uint8_t want_creds,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(sizes);
+
+    if (count == 0) {
+        lean_obj_res empty_parts = lean_alloc_array(0, 0);
+        lean_obj_res empty_fds = lean_alloc_array(0, 0);
+        lean_obj_res none_cred = lean_alloc_ctor(0, 0, 0);
+        lean_obj_res ctrl = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(ctrl, 0, empty_fds);
+        lean_ctor_set(ctrl, 1, none_cred);
+        lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(pair, 0, empty_parts);
+        lean_ctor_set(pair, 1, ctrl);
+        return lean_io_result_mk_ok(pair);
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    uint8_t **buffers = malloc(count * sizeof(uint8_t *));
+    size_t *buf_sizes = malloc(count * sizeof(size_t));
+    if (!iov || !buffers || !buf_sizes) {
+        if (iov) free(iov);
+        if (buffers) free(buffers);
+        if (buf_sizes) free(buf_sizes);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate recvmsg buffers")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        uint32_t sz = lean_unbox_uint32(lean_array_get_core(sizes, i));
+        buf_sizes[i] = (size_t)sz;
+        buffers[i] = NULL;
+        if (sz > 0) {
+            buffers[i] = malloc(sz);
+            if (!buffers[i]) {
+                for (size_t j = 0; j < i; j++) {
+                    if (buffers[j]) free(buffers[j]);
+                }
+                free(iov);
+                free(buffers);
+                free(buf_sizes);
+                return lean_io_result_mk_error(lean_mk_io_user_error(
+                    lean_mk_string("Failed to allocate recvmsg buffer")));
+            }
+        }
+        iov[i].iov_base = buffers[i];
+        iov[i].iov_len = (size_t)sz;
+    }
+
+    size_t control_len = 0;
+    if (max_fds > 0) {
+        control_len += CMSG_SPACE(max_fds * sizeof(int));
+    }
+#if defined(SCM_CREDENTIALS)
+    if (want_creds) {
+        control_len += CMSG_SPACE(sizeof(struct ucred));
+    }
+#else
+    (void)want_creds;
+#endif
+
+    char *control_buf = NULL;
+    if (control_len > 0) {
+        control_buf = malloc(control_len);
+        if (!control_buf) {
+            for (size_t i = 0; i < count; i++) {
+                if (buffers[i]) free(buffers[i]);
+            }
+            free(iov);
+            free(buffers);
+            free(buf_sizes);
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Failed to allocate control buffer")));
+        }
+        memset(control_buf, 0, control_len);
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+    msg.msg_control = control_buf;
+    msg.msg_controllen = control_len;
+
+    ssize_t n = recvmsg(sock->fd, &msg, 0);
+    if (n < 0) {
+        int err = errno;
+        for (size_t i = 0; i < count; i++) {
+            if (buffers[i]) free(buffers[i]);
+        }
+        free(iov);
+        free(buffers);
+        free(buf_sizes);
+        if (control_buf) free(control_buf);
+        return jack_io_error_from_errno(err);
+    }
+
+    size_t remaining = (size_t)n;
+    lean_obj_res parts = lean_alloc_array(count, count);
+    for (size_t i = 0; i < count; i++) {
+        size_t take = 0;
+        if (remaining > 0 && buf_sizes[i] > 0) {
+            take = remaining < buf_sizes[i] ? remaining : buf_sizes[i];
+        }
+
+        lean_obj_res chunk = lean_alloc_sarray(1, take, take);
+        if (take > 0) {
+            memcpy(lean_sarray_cptr(chunk), buffers[i], take);
+            remaining -= take;
+        }
+        lean_array_set_core(parts, i, chunk);
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (buffers[i]) free(buffers[i]);
+    }
+    free(iov);
+    free(buffers);
+    free(buf_sizes);
+
+    size_t out_fd_count = 0;
+    int *out_fds = NULL;
+    if (max_fds > 0) {
+        out_fds = malloc(max_fds * sizeof(int));
+        if (!out_fds) {
+            if (control_buf) free(control_buf);
+            return lean_io_result_mk_error(lean_mk_io_user_error(
+                lean_mk_string("Failed to allocate fd array")));
+        }
+    }
+
+    int have_cred = 0;
+#if defined(SCM_CREDENTIALS)
+    struct ucred cred;
+#endif
+
+    if (control_len > 0) {
+        for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+             cmsg != NULL;
+             cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+                size_t data_len = cmsg->cmsg_len - CMSG_LEN(0);
+                size_t count_fds = data_len / sizeof(int);
+                int *fds = (int *)CMSG_DATA(cmsg);
+                for (size_t i = 0; i < count_fds; i++) {
+                    if (out_fds && out_fd_count < (size_t)max_fds) {
+                        out_fds[out_fd_count++] = fds[i];
+                    } else {
+                        close(fds[i]);
+                    }
+                }
+            }
+#if defined(SCM_CREDENTIALS)
+            if (want_creds && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_CREDENTIALS) {
+                if (cmsg->cmsg_len >= CMSG_LEN(sizeof(struct ucred))) {
+                    memcpy(&cred, CMSG_DATA(cmsg), sizeof(struct ucred));
+                    have_cred = 1;
+                }
+            }
+#endif
+        }
+    }
+
+    lean_obj_res fds_arr = lean_alloc_array(out_fd_count, out_fd_count);
+    for (size_t i = 0; i < out_fd_count; i++) {
+        lean_array_set_core(fds_arr, i, lean_box_uint32((uint32_t)out_fds[i]));
+    }
+    if (out_fds) free(out_fds);
+    if (control_buf) free(control_buf);
+
+    lean_obj_res cred_opt;
+    if (have_cred) {
+#if defined(SCM_CREDENTIALS)
+        lean_obj_res cred_obj = lean_alloc_ctor(0, 0, 3);
+        lean_ctor_set_uint32(cred_obj, 0, (uint32_t)cred.pid);
+        lean_ctor_set_uint32(cred_obj, sizeof(uint32_t), (uint32_t)cred.uid);
+        lean_ctor_set_uint32(cred_obj, 2 * sizeof(uint32_t), (uint32_t)cred.gid);
+        cred_opt = lean_alloc_ctor(1, 1, 0);
+        lean_ctor_set(cred_opt, 0, cred_obj);
+#else
+        cred_opt = lean_alloc_ctor(0, 0, 0);
+#endif
+    } else {
+        cred_opt = lean_alloc_ctor(0, 0, 0);
+    }
+
+    lean_obj_res ctrl = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(ctrl, 0, fds_arr);
+    lean_ctor_set(ctrl, 1, cred_opt);
+
+    lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, parts);
+    lean_ctor_set(pair, 1, ctrl);
+
+    return lean_io_result_mk_ok(pair);
 }
 
 /* Receive data into multiple buffers using recvmsg() with flags */

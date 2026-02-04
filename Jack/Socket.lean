@@ -9,6 +9,25 @@ import Jack.Options
 
 namespace Jack
 
+/-- Unix socket credentials (Linux SCM_CREDENTIALS). -/
+structure MsgCred where
+  pid : UInt32
+  uid : UInt32
+  gid : UInt32
+  deriving Repr, BEq
+
+/-- Control data for sendmsg/recvmsg (SCM_RIGHTS, SCM_CREDENTIALS). -/
+structure MsgControl where
+  fds : Array UInt32
+  cred : Option MsgCred
+  deriving Repr
+
+namespace MsgControl
+
+def empty : MsgControl := { fds := #[], cred := none }
+
+end MsgControl
+
 /-- Opaque TCP socket handle -/
 opaque SocketPointed : NonemptyType
 def Socket : Type := SocketPointed.type
@@ -100,6 +119,10 @@ opaque sendFile (sock : @& Socket) (path : @& String) (offset : UInt64) (count :
 @[extern "jack_socket_send_msg"]
 opaque sendMsg (sock : @& Socket) (chunks : @& Array ByteArray) : IO UInt32
 
+/-- Send data with control messages (SCM_RIGHTS, SCM_CREDENTIALS). -/
+@[extern "jack_socket_send_msg_control"]
+opaque sendMsgControl (sock : @& Socket) (chunks : @& Array ByteArray) (control : @& MsgControl) : IO UInt32
+
 /-- Send data from multiple buffers using sendmsg() with flags. -/
 @[extern "jack_socket_send_msg_flags"]
 opaque sendMsgWithFlags (sock : @& Socket) (chunks : @& Array ByteArray) (flags : UInt32) : IO UInt32
@@ -107,6 +130,10 @@ opaque sendMsgWithFlags (sock : @& Socket) (chunks : @& Array ByteArray) (flags 
 /-- Receive data into multiple buffers using recvmsg(). -/
 @[extern "jack_socket_recv_msg"]
 opaque recvMsg (sock : @& Socket) (sizes : @& Array UInt32) : IO (Array ByteArray)
+
+/-- Receive data and control messages (SCM_RIGHTS, SCM_CREDENTIALS). -/
+@[extern "jack_socket_recv_msg_control"]
+opaque recvMsgControl (sock : @& Socket) (sizes : @& Array UInt32) (maxFds : UInt32) (wantCreds : Bool) : IO (Array ByteArray × MsgControl)
 
 /-- Receive data into multiple buffers using recvmsg() with flags. -/
 @[extern "jack_socket_recv_msg_flags"]

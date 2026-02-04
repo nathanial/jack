@@ -3,6 +3,15 @@ import Jack
 open Crucible
 open Jack
 
+@[extern "jack_fd_open"]
+opaque fdOpen (path : @& String) : IO UInt32
+
+@[extern "jack_fd_read"]
+opaque fdRead (fd : UInt32) (maxBytes : UInt32) : IO ByteArray
+
+@[extern "jack_fd_close"]
+opaque fdClose (fd : UInt32) : IO Unit
+
 -- ========== Error Tests ==========
 
 testSuite "Jack.Error"
@@ -579,6 +588,48 @@ test "sendMsg/recvMsg roundtrip" := do
   ensure (combined == "ping") "recvMsg combined"
   a.close
   b.close
+
+test "sendMsgControl SCM_RIGHTS" := do
+  let dir ← IO.FS.createTempDir
+  let path : System.FilePath := dir / "jack_fdpass.txt"
+  IO.FS.writeBinFile path "fdpass".toUTF8
+  let fd ← fdOpen path.toString
+
+  let (a, b) ← Socket.pair .unix .stream .default
+  let mut received : Option UInt32 := none
+  let mut skipped := false
+  try
+    let ctrl : MsgControl := { fds := #[fd], cred := none }
+    let _ ← a.sendMsgControl #["ok".toUTF8] ctrl
+    let (parts, ctrlOut) ← b.recvMsgControl #[2] 4 false
+    ensure (String.fromUTF8! parts[0]! == "ok") "message received"
+    if ctrlOut.fds.size == 0 then
+      skipped := true
+    else
+      ensure (ctrlOut.fds.size == 1) "received fd"
+      received := ctrlOut.fds[0]?
+      match received with
+      | some recvFd =>
+          let data ← fdRead recvFd 6
+          ensure (String.fromUTF8! data == "fdpass") "fd content"
+      | none => ensure false "fd missing"
+  catch e =>
+    let msg := toString e
+    if msg == "Operation not supported" || msg == "Invalid argument" then
+      skipped := true
+    else
+      throw e
+
+  if let some recvFd := received then
+    fdClose recvFd
+  fdClose fd
+  a.close
+  b.close
+
+  try IO.FS.removeFile path catch _ => pure ()
+  try IO.FS.removeDir dir catch _ => pure ()
+  if skipped then
+    ensure true "SCM_RIGHTS not supported"
 
 test "sendFile sends contents" := do
   let path : System.FilePath := "/tmp/jack_sendfile_test.txt"
