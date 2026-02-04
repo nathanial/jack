@@ -225,6 +225,17 @@ test "connect with string address" := do
   conn.close
   server.close
 
+test "recvWithFlags MSG_PEEK does not consume" := do
+  let (a, b) ← Socket.pair .unix .stream .default
+  let peekFlag ← SocketMsgFlag.peek
+  a.sendAll "peek".toUTF8
+  let peeked ← b.recvWithFlags 4 peekFlag
+  let consumed ← b.recv 4
+  ensure (String.fromUTF8! peeked == "peek") "peeked data"
+  ensure (String.fromUTF8! consumed == "peek") "data still available"
+  a.close
+  b.close
+
 test "connectHostPort resolves IPv4/IPv6" := do
   let server ← Socket.new
   server.bind "127.0.0.1" 0

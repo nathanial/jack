@@ -72,9 +72,17 @@ opaque recv (sock : @& Socket) (maxBytes : UInt32) : IO ByteArray
 @[extern "jack_socket_recv_try"]
 opaque recvTry (sock : @& Socket) (maxBytes : UInt32) : IO (SocketResult ByteArray)
 
+/-- Receive data from socket with flags (MSG_PEEK, MSG_DONTWAIT, etc.). -/
+@[extern "jack_socket_recv_flags"]
+opaque recvWithFlags (sock : @& Socket) (maxBytes : UInt32) (flags : UInt32) : IO ByteArray
+
 /-- Send data to socket -/
 @[extern "jack_socket_send"]
 opaque send (sock : @& Socket) (data : @& ByteArray) : IO Unit
+
+/-- Send data to socket with flags (MSG_NOSIGNAL, MSG_DONTWAIT, etc.). -/
+@[extern "jack_socket_send_flags"]
+opaque sendWithFlags (sock : @& Socket) (data : @& ByteArray) (flags : UInt32) : IO Unit
 
 /-- Send data to socket (non-blocking try). Returns bytes sent. -/
 @[extern "jack_socket_send_try"]
@@ -92,9 +100,17 @@ opaque sendFile (sock : @& Socket) (path : @& String) (offset : UInt64) (count :
 @[extern "jack_socket_send_msg"]
 opaque sendMsg (sock : @& Socket) (chunks : @& Array ByteArray) : IO UInt32
 
+/-- Send data from multiple buffers using sendmsg() with flags. -/
+@[extern "jack_socket_send_msg_flags"]
+opaque sendMsgWithFlags (sock : @& Socket) (chunks : @& Array ByteArray) (flags : UInt32) : IO UInt32
+
 /-- Receive data into multiple buffers using recvmsg(). -/
 @[extern "jack_socket_recv_msg"]
 opaque recvMsg (sock : @& Socket) (sizes : @& Array UInt32) : IO (Array ByteArray)
+
+/-- Receive data into multiple buffers using recvmsg() with flags. -/
+@[extern "jack_socket_recv_msg_flags"]
+opaque recvMsgWithFlags (sock : @& Socket) (sizes : @& Array UInt32) (flags : UInt32) : IO (Array ByteArray)
 
 /-- Send out-of-band data (TCP urgent data). -/
 @[extern "jack_socket_send_oob"]
@@ -271,6 +287,10 @@ opaque getError (sock : @& Socket) : IO (Option SocketError)
 @[extern "jack_socket_send_to"]
 opaque sendTo (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) : IO Unit
 
+/-- Send data to a specific address (UDP) with flags. -/
+@[extern "jack_socket_send_to_flags"]
+opaque sendToWithFlags (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) (flags : UInt32) : IO Unit
+
 /-- Send data to a specific address (UDP, non-blocking try). Returns bytes sent. -/
 @[extern "jack_socket_send_to_try"]
 opaque sendToTry (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) : IO (SocketResult UInt32)
@@ -278,6 +298,10 @@ opaque sendToTry (sock : @& Socket) (data : @& ByteArray) (addr : @& SockAddr) :
 /-- Receive data and sender address (UDP) -/
 @[extern "jack_socket_recv_from"]
 opaque recvFrom (sock : @& Socket) (maxBytes : UInt32) : IO (ByteArray × SockAddr)
+
+/-- Receive data and sender address (UDP) with flags. -/
+@[extern "jack_socket_recv_from_flags"]
+opaque recvFromWithFlags (sock : @& Socket) (maxBytes : UInt32) (flags : UInt32) : IO (ByteArray × SockAddr)
 
 /-- Receive data and sender address (UDP, non-blocking try). -/
 @[extern "jack_socket_recv_from_try"]

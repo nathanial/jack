@@ -80,6 +80,35 @@ LEAN_EXPORT lean_obj_res jack_const_ipv6_v6only(lean_obj_arg world) {
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)IPV6_V6ONLY));
 }
 
+LEAN_EXPORT lean_obj_res jack_const_msg_peek(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)MSG_PEEK));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_msg_dontwait(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)MSG_DONTWAIT));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_msg_waitall(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)MSG_WAITALL));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_msg_oob(lean_obj_arg world) {
+    (void)world;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)MSG_OOB));
+}
+
+LEAN_EXPORT lean_obj_res jack_const_msg_nosignal(lean_obj_arg world) {
+    (void)world;
+#ifdef MSG_NOSIGNAL
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)MSG_NOSIGNAL));
+#else
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)0));
+#endif
+}
+
 /* Socket handle - just wraps a file descriptor */
 typedef struct {
     int fd;
@@ -853,10 +882,10 @@ LEAN_EXPORT lean_obj_res jack_socket_accept_try(
 
 /* ========== Send/Recv ========== */
 
-static lean_obj_res jack_socket_send_loop(jack_socket_t *sock, const uint8_t *ptr, size_t len) {
+static lean_obj_res jack_socket_send_loop_flags(jack_socket_t *sock, const uint8_t *ptr, size_t len, int flags) {
     size_t sent = 0;
     while (sent < len) {
-        ssize_t n = send(sock->fd, ptr + sent, len - sent, 0);
+        ssize_t n = send(sock->fd, ptr + sent, len - sent, flags);
         if (n < 0) {
             return jack_io_error_from_errno(errno);
         }
@@ -868,6 +897,10 @@ static lean_obj_res jack_socket_send_loop(jack_socket_t *sock, const uint8_t *pt
     }
 
     return lean_io_result_mk_ok(lean_box(0));
+}
+
+static lean_obj_res jack_socket_send_loop(jack_socket_t *sock, const uint8_t *ptr, size_t len) {
+    return jack_socket_send_loop_flags(sock, ptr, len, 0);
 }
 
 /* Receive data */
@@ -885,6 +918,35 @@ LEAN_EXPORT lean_obj_res jack_socket_recv(
     }
 
     ssize_t n = recv(sock->fd, buffer, max_bytes, 0);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        return jack_io_error_from_errno(err);
+    }
+
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    return lean_io_result_mk_ok(arr);
+}
+
+/* Receive data with flags */
+LEAN_EXPORT lean_obj_res jack_socket_recv_flags(
+    b_lean_obj_arg sock_obj,
+    uint32_t max_bytes,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate buffer")));
+    }
+
+    ssize_t n = recv(sock->fd, buffer, max_bytes, (int)flags);
     if (n < 0) {
         int err = errno;
         free(buffer);
@@ -940,6 +1002,21 @@ LEAN_EXPORT lean_obj_res jack_socket_send(
     const uint8_t *ptr = lean_sarray_cptr(data);
 
     return jack_socket_send_loop(sock, ptr, len);
+}
+
+/* Send data with flags */
+LEAN_EXPORT lean_obj_res jack_socket_send_flags(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    return jack_socket_send_loop_flags(sock, ptr, len, (int)flags);
 }
 
 /* Send data (non-blocking try) */
@@ -1144,6 +1221,47 @@ LEAN_EXPORT lean_obj_res jack_socket_send_msg(
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
 }
 
+/* Send data from multiple buffers using sendmsg() with flags */
+LEAN_EXPORT lean_obj_res jack_socket_send_msg_flags(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg chunks,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(chunks);
+
+    if (count == 0) {
+        return lean_io_result_mk_ok(lean_box_uint32(0));
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    if (!iov) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate iovec array")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        lean_obj_arg chunk = lean_array_get_core(chunks, i);
+        iov[i].iov_base = (void *)lean_sarray_cptr(chunk);
+        iov[i].iov_len = (size_t)lean_sarray_size(chunk);
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+
+    ssize_t n = sendmsg(sock->fd, &msg, (int)flags);
+    free(iov);
+
+    if (n < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
+}
+
 /* Send out-of-band data (TCP urgent data) */
 LEAN_EXPORT lean_obj_res jack_socket_send_oob(
     b_lean_obj_arg sock_obj,
@@ -1279,6 +1397,95 @@ LEAN_EXPORT lean_obj_res jack_socket_recv_msg(
     return lean_io_result_mk_ok(arr);
 }
 
+/* Receive data into multiple buffers using recvmsg() with flags */
+LEAN_EXPORT lean_obj_res jack_socket_recv_msg_flags(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg sizes,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    size_t count = lean_array_size(sizes);
+
+    if (count == 0) {
+        return lean_io_result_mk_ok(lean_alloc_array(0, 0));
+    }
+
+    struct iovec *iov = malloc(count * sizeof(struct iovec));
+    uint8_t **buffers = malloc(count * sizeof(uint8_t *));
+    size_t *buf_sizes = malloc(count * sizeof(size_t));
+    if (!iov || !buffers || !buf_sizes) {
+        if (iov) free(iov);
+        if (buffers) free(buffers);
+        if (buf_sizes) free(buf_sizes);
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate recvmsg buffers")));
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        uint32_t sz = lean_unbox_uint32(lean_array_get_core(sizes, i));
+        buf_sizes[i] = (size_t)sz;
+        buffers[i] = NULL;
+        if (sz > 0) {
+            buffers[i] = malloc(sz);
+            if (!buffers[i]) {
+                for (size_t j = 0; j < i; j++) {
+                    if (buffers[j]) free(buffers[j]);
+                }
+                free(iov);
+                free(buffers);
+                free(buf_sizes);
+                return lean_io_result_mk_error(lean_mk_io_user_error(
+                    lean_mk_string("Failed to allocate recvmsg buffer")));
+            }
+        }
+        iov[i].iov_base = buffers[i];
+        iov[i].iov_len = (size_t)sz;
+    }
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+
+    ssize_t n = recvmsg(sock->fd, &msg, (int)flags);
+    if (n < 0) {
+        int err = errno;
+        for (size_t i = 0; i < count; i++) {
+            if (buffers[i]) free(buffers[i]);
+        }
+        free(iov);
+        free(buffers);
+        free(buf_sizes);
+        return jack_io_error_from_errno(err);
+    }
+
+    size_t remaining = (size_t)n;
+    lean_obj_res arr = lean_alloc_array(count, count);
+    for (size_t i = 0; i < count; i++) {
+        size_t take = 0;
+        if (remaining > 0 && buf_sizes[i] > 0) {
+            take = remaining < buf_sizes[i] ? remaining : buf_sizes[i];
+        }
+
+        lean_obj_res chunk = lean_alloc_sarray(1, take, take);
+        if (take > 0) {
+            memcpy(lean_sarray_cptr(chunk), buffers[i], take);
+            remaining -= take;
+        }
+        lean_array_set_core(arr, i, chunk);
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (buffers[i]) free(buffers[i]);
+    }
+    free(iov);
+    free(buffers);
+    free(buf_sizes);
+
+    return lean_io_result_mk_ok(arr);
+}
+
 /* Shutdown socket (half-close) */
 LEAN_EXPORT lean_obj_res jack_socket_shutdown(
     b_lean_obj_arg sock_obj,
@@ -1325,6 +1532,35 @@ LEAN_EXPORT lean_obj_res jack_socket_send_to(
     const uint8_t *ptr = lean_sarray_cptr(data);
 
     ssize_t n = sendto(sock->fd, ptr, len, 0, (struct sockaddr *)&sa, sa_len);
+    if (n < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Send data to specific address (UDP) with flags */
+LEAN_EXPORT lean_obj_res jack_socket_send_to_flags(
+    b_lean_obj_arg sock_obj,
+    b_lean_obj_arg data,
+    b_lean_obj_arg addr,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct sockaddr_storage sa;
+    socklen_t sa_len;
+
+    if (lean_to_sockaddr(addr, &sa, &sa_len) < 0) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Invalid address")));
+    }
+
+    size_t len = lean_sarray_size(data);
+    const uint8_t *ptr = lean_sarray_cptr(data);
+
+    ssize_t n = sendto(sock->fd, ptr, len, (int)flags, (struct sockaddr *)&sa, sa_len);
     if (n < 0) {
         return jack_io_error_from_errno(errno);
     }
@@ -1381,6 +1617,48 @@ LEAN_EXPORT lean_obj_res jack_socket_recv_from(
     socklen_t from_len = sizeof(from_addr);
 
     ssize_t n = recvfrom(sock->fd, buffer, max_bytes, 0,
+                         (struct sockaddr *)&from_addr, &from_len);
+    if (n < 0) {
+        int err = errno;
+        free(buffer);
+        return jack_io_error_from_errno(err);
+    }
+
+    /* Create ByteArray */
+    lean_obj_res arr = lean_alloc_sarray(1, n, n);
+    memcpy(lean_sarray_cptr(arr), buffer, n);
+    free(buffer);
+
+    /* Create SockAddr */
+    lean_obj_res lean_addr = sockaddr_to_lean((struct sockaddr *)&from_addr, from_len);
+
+    /* Create tuple (ByteArray × SockAddr) */
+    lean_obj_res pair = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(pair, 0, arr);
+    lean_ctor_set(pair, 1, lean_addr);
+
+    return lean_io_result_mk_ok(pair);
+}
+
+/* Receive data with sender address (UDP) with flags */
+LEAN_EXPORT lean_obj_res jack_socket_recv_from_flags(
+    b_lean_obj_arg sock_obj,
+    uint32_t max_bytes,
+    uint32_t flags,
+    lean_obj_arg world
+) {
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    uint8_t *buffer = malloc(max_bytes);
+    if (!buffer) {
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("Failed to allocate buffer")));
+    }
+
+    struct sockaddr_storage from_addr;
+    socklen_t from_len = sizeof(from_addr);
+
+    ssize_t n = recvfrom(sock->fd, buffer, max_bytes, (int)flags,
                          (struct sockaddr *)&from_addr, &from_len);
     if (n < 0) {
         int err = errno;

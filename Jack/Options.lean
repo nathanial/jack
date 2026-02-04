@@ -49,4 +49,28 @@ opaque ipv6V6Only : IO UInt32
 
 end SocketOption
 
+namespace SocketMsgFlag
+
+/-- MSG_PEEK flag. -/
+@[extern "jack_const_msg_peek"]
+opaque peek : IO UInt32
+
+/-- MSG_DONTWAIT flag. -/
+@[extern "jack_const_msg_dontwait"]
+opaque dontWait : IO UInt32
+
+/-- MSG_WAITALL flag. -/
+@[extern "jack_const_msg_waitall"]
+opaque waitAll : IO UInt32
+
+/-- MSG_OOB flag. -/
+@[extern "jack_const_msg_oob"]
+opaque oob : IO UInt32
+
+/-- MSG_NOSIGNAL flag (0 if unsupported). -/
+@[extern "jack_const_msg_nosignal"]
+opaque noSignal : IO UInt32
+
+end SocketMsgFlag
+
 end Jack
