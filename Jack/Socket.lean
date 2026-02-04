@@ -194,6 +194,30 @@ opaque fd (sock : @& Socket) : UInt32
 @[extern "jack_socket_set_timeout"]
 opaque setTimeout (sock : @& Socket) (timeoutSecs : UInt32) : IO Unit
 
+/-- Set recv/send timeouts in milliseconds -/
+@[extern "jack_socket_set_timeout_ms"]
+opaque setTimeoutMs (sock : @& Socket) (timeoutMs : UInt32) : IO Unit
+
+/-- Set receive timeout in milliseconds -/
+@[extern "jack_socket_set_recv_timeout_ms"]
+opaque setRecvTimeoutMs (sock : @& Socket) (timeoutMs : UInt32) : IO Unit
+
+/-- Set send timeout in milliseconds -/
+@[extern "jack_socket_set_send_timeout_ms"]
+opaque setSendTimeoutMs (sock : @& Socket) (timeoutMs : UInt32) : IO Unit
+
+/-- Set TCP keepalive idle time (seconds). -/
+@[extern "jack_socket_set_tcp_keepidle"]
+opaque setTcpKeepIdle (sock : @& Socket) (seconds : UInt32) : IO Unit
+
+/-- Set TCP keepalive interval (seconds). -/
+@[extern "jack_socket_set_tcp_keepintvl"]
+opaque setTcpKeepInterval (sock : @& Socket) (seconds : UInt32) : IO Unit
+
+/-- Set TCP keepalive retry count. -/
+@[extern "jack_socket_set_tcp_keepcnt"]
+opaque setTcpKeepCount (sock : @& Socket) (count : UInt32) : IO Unit
+
 /-- Set a raw socket option value. The ByteArray is passed as-is to setsockopt. -/
 @[extern "jack_socket_set_option"]
 opaque setOption (sock : @& Socket) (level : UInt32) (optName : UInt32) (value : @& ByteArray) : IO Unit

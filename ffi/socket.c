@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <limits.h>
 #include <stddef.h>
 #if defined(__has_include)
@@ -2471,6 +2472,134 @@ LEAN_EXPORT lean_obj_res jack_socket_set_timeout(
     setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
     return lean_io_result_mk_ok(lean_box(0));
+}
+
+static void jack_ms_to_timeval(uint32_t ms, struct timeval *tv) {
+    tv->tv_sec = (time_t)(ms / 1000);
+    tv->tv_usec = (suseconds_t)((ms % 1000) * 1000);
+}
+
+/* Set socket recv/send timeouts in milliseconds */
+LEAN_EXPORT lean_obj_res jack_socket_set_timeout_ms(
+    b_lean_obj_arg sock_obj,
+    uint32_t timeout_ms,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct timeval timeout;
+    jack_ms_to_timeval(timeout_ms, &timeout);
+
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Set socket recv timeout in milliseconds */
+LEAN_EXPORT lean_obj_res jack_socket_set_recv_timeout_ms(
+    b_lean_obj_arg sock_obj,
+    uint32_t timeout_ms,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct timeval timeout;
+    jack_ms_to_timeval(timeout_ms, &timeout);
+
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Set socket send timeout in milliseconds */
+LEAN_EXPORT lean_obj_res jack_socket_set_send_timeout_ms(
+    b_lean_obj_arg sock_obj,
+    uint32_t timeout_ms,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+
+    struct timeval timeout;
+    jack_ms_to_timeval(timeout_ms, &timeout);
+
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Set TCP keepalive idle time (seconds) */
+LEAN_EXPORT lean_obj_res jack_socket_set_tcp_keepidle(
+    b_lean_obj_arg sock_obj,
+    uint32_t seconds,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int value = (int)seconds;
+#if defined(TCP_KEEPIDLE)
+    int opt = TCP_KEEPIDLE;
+#elif defined(TCP_KEEPALIVE)
+    int opt = TCP_KEEPALIVE;
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+    if (setsockopt(sock->fd, IPPROTO_TCP, opt, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Set TCP keepalive interval (seconds) */
+LEAN_EXPORT lean_obj_res jack_socket_set_tcp_keepintvl(
+    b_lean_obj_arg sock_obj,
+    uint32_t seconds,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int value = (int)seconds;
+#ifdef TCP_KEEPINTVL
+    if (setsockopt(sock->fd, IPPROTO_TCP, TCP_KEEPINTVL, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
+}
+
+/* Set TCP keepalive count */
+LEAN_EXPORT lean_obj_res jack_socket_set_tcp_keepcnt(
+    b_lean_obj_arg sock_obj,
+    uint32_t count,
+    lean_obj_arg world
+) {
+    (void)world;
+    jack_socket_t *sock = jack_socket_unbox(sock_obj);
+    int value = (int)count;
+#ifdef TCP_KEEPCNT
+    if (setsockopt(sock->fd, IPPROTO_TCP, TCP_KEEPCNT, &value, sizeof(value)) < 0) {
+        return jack_io_error_from_errno(errno);
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+#else
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+        lean_mk_string("Operation not supported")));
+#endif
 }
 
 /* Set raw socket option */

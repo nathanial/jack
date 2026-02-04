@@ -291,6 +291,32 @@ test "setTimeout" := do
   sock.setTimeout 1
   sock.close
 
+test "setTimeoutMs" := do
+  let sock ← Socket.new
+  sock.setTimeoutMs 250
+  sock.setRecvTimeoutMs 150
+  sock.setSendTimeoutMs 150
+  sock.close
+
+test "tcp keepalive tuning" := do
+  let sock ← Socket.new
+  let mut skipped := false
+  try
+    sock.setTcpKeepIdle 60
+    sock.setTcpKeepInterval 10
+    sock.setTcpKeepCount 3
+  catch e =>
+    let msg := toString e
+    if msg == "Operation not supported" ||
+       msg == "Protocol not supported" ||
+       msg == "Invalid argument" then
+      skipped := true
+    else
+      throw e
+  sock.close
+  if skipped then
+    ensure true "keepalive tuning not supported"
+
 -- ========== UDP Tests ==========
 
 testSuite "Jack.UDP"
