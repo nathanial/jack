@@ -225,6 +225,28 @@ test "connect with string address" := do
   conn.close
   server.close
 
+test "connectHostPort resolves IPv4/IPv6" := do
+  let server ← Socket.new
+  server.bind "127.0.0.1" 0
+  server.listen 1
+  let serverAddr ← server.getLocalAddr
+  let port := match serverAddr with
+    | .ipv4 _ p => p
+    | _ => 0
+
+  let clientTask ← IO.asTask do
+    let client ← Socket.connectHostPort "localhost" port
+    client.sendAll "ping".toUTF8
+    client.close
+
+  let conn ← server.accept
+  let data ← conn.recv 4
+  ensure (String.fromUTF8! data == "ping") "received ping"
+  conn.close
+  server.close
+
+  let _ ← IO.ofExcept clientTask.get
+
 test "get local address after bind" := do
   let sock ← Socket.new
   sock.bind "127.0.0.1" 0

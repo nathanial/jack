@@ -112,6 +112,37 @@ opaque shutdown (sock : @& Socket) (mode : ShutdownMode) : IO Unit
 @[extern "jack_socket_close"]
 opaque close (sock : Socket) : IO Unit
 
+/-- Connect to a host and port by resolving IPv4/IPv6 addresses.
+    Returns a connected socket (TCP). -/
+def connectHostPort (host : String) (port : UInt16) : IO Socket := do
+  let addrs ← SockAddr.resolveHostPort host port
+  if addrs.isEmpty then
+    throw (IO.userError s!"No addresses resolved for {host}:{port}")
+  let mut lastErr : Option String := none
+  for addr in addrs do
+    let family? : Option AddressFamily :=
+      match addr with
+      | .ipv4 _ _ => some .inet
+      | .ipv6 _ _ => some .inet6
+      | _ => none
+    match family? with
+    | none => pure ()
+    | some family =>
+        let sock ← Socket.create family .stream .tcp
+        let ok ← try
+          sock.connectAddr addr
+          pure true
+        catch e =>
+          lastErr := some (toString e)
+          Socket.close sock
+          pure false
+        if ok then
+          return sock
+  let msg := match lastErr with
+    | some m => m
+    | none => "No usable addresses"
+  throw (IO.userError s!"Failed to connect to {host}:{port}: {msg}")
+
 /-- Get the underlying file descriptor (for debugging) -/
 @[extern "jack_socket_fd"]
 opaque fd (sock : @& Socket) : UInt32
